@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Moon, Orbit, CalendarRange, TrendingUp, Crosshair, Info, Target, Plus, Trash2, History, CheckCircle2, XCircle, Download, Loader2, Zap, Sparkles, RotateCcw, Milestone, Camera } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Moon, Orbit, CalendarRange, TrendingUp, Crosshair, Info, Target, Plus, Trash2, History, CheckCircle2, XCircle, Download, Loader2, Zap, Sparkles, RotateCcw, Milestone, Camera, Search, Settings, Trophy, Medal, ArrowRight } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ComposedChart, Line
 } from 'recharts';
 import { fetchMarketData, detectSwings } from './src/services/marketData.js';
+import { runGridSearchOptimizer, formatToggleLabel } from './src/services/backtestOptimizer.js';
 
 // ---------------------------------------------------------------------------
 // Astronomical & Fibonacci core math
@@ -339,6 +340,12 @@ function computeMoonEvents(minAnchorMs, maxTargetMs) {
   return events.sort((x, y) => x.date.getTime() - y.date.getTime());
 }
 
+// Pasangan planet yang signifikan secara astrologi keuangan untuk aspek minor (Trine/Sextile)
+const MAJOR_FINANCIAL_PAIRS = new Set([
+  'Sun-Jupiter', 'Sun-Saturn', 'Sun-Mars',
+  'Jupiter-Saturn', 'Mars-Jupiter', 'Mars-Saturn',
+]);
+
 function computePlanetEvents(minAnchorMs, maxTargetMs) {
   const events = [];
   const anchorDaysJ2000 = (minAnchorMs - J2000) / DAY_MS;
@@ -351,6 +358,7 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
     }
   }
   for (const pair of PAIRS) {
+    const isMajorPair = MAJOR_FINANCIAL_PAIRS.has(pair.label);
     let prevConj = null, prevOpp = null, prevSq1 = null, prevSq2 = null, prevTri1 = null, prevTri2 = null, prevSex1 = null, prevSex2 = null;
     for (let d = 0; d <= maxDays; d++) {
       const days = anchorDaysJ2000 + d;
@@ -361,20 +369,25 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
       if (d > 0) {
         const isCross = (p, c) => p !== null && c !== null && (p >= 0 ? 1 : -1) !== (c >= 0 ? 1 : -1) && Math.abs(p - c) < 180;
         
+        // Conjunction & Opposition: all pairs (high significance)
         if (isCross(prevConj, conj)) {
           events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Konjungsi (0°): ${pair.label}`, weight: 3.0 });
         }
         if (isCross(prevOpp, opp)) {
           events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Oposisi (180°): ${pair.label}`, weight: 2.5 });
         }
+        // Square: all pairs (medium significance)
         if (isCross(prevSq1, sq1) || isCross(prevSq2, sq2)) {
           events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Square (90°): ${pair.label}`, weight: 1.5 });
         }
-        if (isCross(prevTri1, tri1) || isCross(prevTri2, tri2)) {
-          events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Trine (120°): ${pair.label}`, weight: 1.0 });
-        }
-        if (isCross(prevSex1, sex1) || isCross(prevSex2, sex2)) {
-          events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Sextile (60°): ${pair.label}`, weight: 0.5 });
+        // Trine & Sextile: only major financial pairs (reduces noise drastically)
+        if (isMajorPair) {
+          if (isCross(prevTri1, tri1) || isCross(prevTri2, tri2)) {
+            events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
+          }
+          if (isCross(prevSex1, sex1) || isCross(prevSex2, sex2)) {
+            events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
+          }
         }
       }
       prevConj = conj; prevOpp = opp; prevSq1 = sq1; prevSq2 = sq2; prevTri1 = tri1; prevTri2 = tri2; prevSex1 = sex1; prevSex2 = sex2;
@@ -468,11 +481,18 @@ function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, nata
   const clusters = [];
   let current = [];
   for (const ev of all) {
-    if (current.length === 0 || (ev.ms - current[0].ms) / DAY_MS <= tolerance * 2) {
+    if (current.length === 0) {
       current.push(ev);
     } else {
-      if (current.length >= 2) clusters.push(current);
-      current = [ev];
+      const distFromLast = (ev.ms - current[current.length - 1].ms) / DAY_MS;
+      const totalSpan = (ev.ms - current[0].ms) / DAY_MS;
+      // Event must be within tolerance of the last event AND total span must not exceed tolerance * 2
+      if (distFromLast <= tolerance && totalSpan <= tolerance * 2) {
+        current.push(ev);
+      } else {
+        if (current.length >= 2) clusters.push(current);
+        current = [ev];
+      }
     }
   }
   if (current.length >= 2) clusters.push(current);
@@ -491,19 +511,38 @@ function rankClusters(clusters) {
     const typesPresent = new Set();
     const uniqueAnchors = new Set();
     
+    const weightsByType = {};
+    
     c.forEach(ev => {
-      // Use individual event weight instead of flat per-type score
-      weightedScore += ev.weight || 1.0;
-      typesPresent.add(ev.type);
+      const type = ev.type;
+      if (!weightsByType[type]) weightsByType[type] = [];
+      weightsByType[type].push(ev.weight || 1.0);
+      
+      typesPresent.add(type);
       if (ev.anchorId) uniqueAnchors.add(ev.anchorId);
       
-      if (ev.type === 'fibo' || ev.type === 'interfibo') fiboCount++;
-      if (ev.type === 'bulan') bulanCount++;
-      if (ev.type === 'planet') planetCount++;
-      if (ev.type === 'natal') natalCount++;
-      if (ev.type === 'retro') retroCount++;
-      if (ev.type === 'ingress') ingressCount++;
+      if (type === 'fibo' || type === 'interfibo') fiboCount++;
+      if (type === 'bulan') bulanCount++;
+      if (type === 'planet') planetCount++;
+      if (type === 'natal') natalCount++;
+      if (type === 'retro') retroCount++;
+      if (type === 'ingress') ingressCount++;
     });
+    
+    // Calculate weighted score with diminishing returns for events of the same type
+    for (const type in weightsByType) {
+      // Sort weights descending so strongest events contribute most
+      const sortedWeights = weightsByType[type].sort((a, b) => b - a);
+      
+      sortedWeights.forEach((w, idx) => {
+        let multiplier = 1.0;
+        if (idx === 1) multiplier = 0.75;
+        else if (idx === 2) multiplier = 0.50;
+        else if (idx >= 3) multiplier = 0.25;
+        
+        weightedScore += w * multiplier;
+      });
+    }
     
     // Diversity bonus: non-linear exponential scaling for robust confluence
     // 1 type = 1.0x, 2 types = ~1.2x, 3 types = ~1.56x, 4 types = ~2.04x
@@ -572,20 +611,23 @@ function computeBacktest(clusters, actualReversals, tolerance) {
     const minC = clusterCenter - tolerance * DAY_MS;
     const maxC = clusterCenter + tolerance * DAY_MS;
     
-    const hitDates = revMs.filter(ms => ms >= minC && ms <= maxC);
-    const isHit = hitDates.length > 0;
+    // Find only the NEAREST unmatched reversal within the tolerance window (prevents Recall inflation)
+    const candidateRevs = revMs
+      .filter(ms => ms >= minC && ms <= maxC && !matchedReversals.has(ms))
+      .sort((a, b) => Math.abs(a - clusterCenter) - Math.abs(b - clusterCenter));
+    
+    const nearestRev = candidateRevs.length > 0 ? candidateRevs[0] : null;
+    const isHit = nearestRev !== null;
     if (isHit) {
       truePositives++;
-      hitDates.forEach(ms => {
-        matchedReversals.add(ms);
-        timingErrors.push(Math.abs(ms - clusterCenter) / DAY_MS);
-      });
+      matchedReversals.add(nearestRev);
+      timingErrors.push(Math.abs(nearestRev - clusterCenter) / DAY_MS);
     }
     
     return {
       cluster: c,
       isHit,
-      hitDates: hitDates.map(ms => new Date(ms))
+      hitDates: isHit ? [new Date(nearestRev)] : []
     };
   });
   
@@ -869,6 +911,9 @@ export default function App() {
   const [minSignalScore, setMinSignalScore] = useLocalStorage('fibo-astro-min-score', 6.0);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [gridSearchResult, setGridSearchResult] = useState(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizerProgress, setOptimizerProgress] = useState({ phase: 0, percent: 0, bestSoFar: null });
 
   const parsedAnchors = useMemo(() => {
     return anchors.map(a => ({
@@ -922,6 +967,87 @@ export default function App() {
   const handleAddAnchor = () => {
     setAnchors([...anchors, { id: Date.now(), date: new Date().toISOString().slice(0, 10), high: '', low: '' }]);
   };
+
+  // ---- Grid Search Optimizer ----
+  const handleRunGridSearch = useCallback(async () => {
+    if (parsedAnchors.length === 0 || actualReversals.filter(r => r.date).length === 0) {
+      alert('Silakan muat data terlebih dahulu (Auto-Detect) dan pastikan ada data reversal aktual untuk backtest!');
+      return;
+    }
+    setIsOptimizing(true);
+    setGridSearchResult(null);
+    setOptimizerProgress({ phase: 0, percent: 0, bestSoFar: null });
+
+    try {
+      // Caches for expensive computations (keyed by projectionDays / dayMode)
+      const astroCache = new Map();
+      const fibCache = new Map();
+      const testMinAnchorMs = Math.min(...parsedAnchors.map(a => a.ms));
+
+      const result = await runGridSearchOptimizer(
+        (params) => {
+          const testMaxTargetMs = Math.max(...parsedAnchors.map(a => a.ms + params.projectionDays * DAY_MS));
+
+          // Cache expensive astro computations by projectionDays (only varies ~3 times)
+          const astroKey = String(params.projectionDays);
+          let astro = astroCache.get(astroKey);
+          if (!astro) {
+            astro = {
+              moonEvents: computeMoonEvents(testMinAnchorMs, testMaxTargetMs),
+              planetEvents: computePlanetEvents(testMinAnchorMs, testMaxTargetMs),
+              natalEvents: computeNatalEvents(ticker, testMinAnchorMs, testMaxTargetMs),
+              retroEvents: computeRetrogradeEvents(testMinAnchorMs, testMaxTargetMs),
+              ingressEvents: computeIngressEvents(testMinAnchorMs, testMaxTargetMs),
+              interFibZones: computeInterAnchorFib(parsedAnchors, testMinAnchorMs, testMaxTargetMs),
+            };
+            astroCache.set(astroKey, astro);
+          }
+
+          // Cache fibZones by projectionDays + dayMode (only varies ~6 times)
+          const fibKey = `${params.projectionDays}|${params.dayMode}`;
+          let testFibZones = fibCache.get(fibKey);
+          if (!testFibZones) {
+            testFibZones = computeFibZones(parsedAnchors, params.projectionDays, params.dayMode);
+            fibCache.set(fibKey, testFibZones);
+          }
+
+          // Cheap: buildConfluence + rankClusters + computeBacktest
+          const { clusters: testClusters } = buildConfluence(
+            testFibZones, astro.interFibZones, astro.moonEvents, astro.planetEvents,
+            params.useNatal ? astro.natalEvents : [],
+            params.useRetrograde ? astro.retroEvents : [],
+            params.useIngress ? astro.ingressEvents : [],
+            params.confluenceTolerance
+          );
+          const testRanked = rankClusters(testClusters);
+          const filteredClusters = testRanked.filter(c => c.score >= params.minSignalScore).map(c => c.events);
+          return computeBacktest(filteredClusters, actualReversals, params.confluenceTolerance);
+        },
+        (progress) => {
+          setOptimizerProgress(progress);
+        }
+      );
+      setGridSearchResult(result);
+    } catch (err) {
+      console.error('Grid Search Error:', err);
+      alert('Grid Search gagal: ' + err.message);
+    } finally {
+      setIsOptimizing(false);
+    }
+  }, [parsedAnchors, actualReversals, ticker]);
+
+  const handleApplyBestConfig = useCallback((config) => {
+    if (!config || !config.params) return;
+    const p = config.params;
+    setConfluenceTolerance(p.confluenceTolerance);
+    setSwingLookback(p.swingLookback);
+    setMinSignalScore(p.minSignalScore);
+    setProjectionDays(p.projectionDays);
+    setDayMode(p.dayMode);
+    setUseNatal(p.useNatal);
+    setUseRetrograde(p.useRetrograde);
+    setUseIngress(p.useIngress);
+  }, []);
 
   const handleAutoDetect = async (strategy = 'normal') => {
     if (typeof strategy !== 'string') strategy = 'normal';
@@ -1101,7 +1227,7 @@ export default function App() {
               </label>
               <label className="flex flex-col gap-1.5 text-sm text-slate-400">
                 <span>Toleransi Konfluensi: <span className="text-amber-400 font-mono-custom font-medium">±{confluenceTolerance} hari</span></span>
-                <input type="range" min="0" max="3" step="1" value={confluenceTolerance} onChange={(e) => setConfluenceTolerance(Number(e.target.value))} className="mt-1 accent-amber-400 h-1.5 rounded-full appearance-none bg-midnight-800 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-amber-400/30 [&::-webkit-slider-thumb]:cursor-pointer" />
+                <input type="range" min="0" max="2" step="0.5" value={confluenceTolerance} onChange={(e) => setConfluenceTolerance(Number(e.target.value))} className="mt-1 accent-amber-400 h-1.5 rounded-full appearance-none bg-midnight-800 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-amber-400/30 [&::-webkit-slider-thumb]:cursor-pointer" />
               </label>
               <label className="flex flex-col gap-1.5 text-sm text-slate-400">
                 <span>Sensitivitas Swing: <span className="text-indigo-400 font-mono-custom font-medium">{swingLookback} hari</span></span>
@@ -1513,6 +1639,200 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* ======== GRID SEARCH OPTIMIZER ======== */}
+            <div className="glass rounded-2xl p-5 sm:p-6 mb-5 animate-fade-in-up stagger-3 border border-dashed border-amber-500/30">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-amber-400/10">
+                    <Settings className="w-5 h-5 text-amber-400 animate-spin" style={{ animationDuration: '8s' }} />
+                  </div>
+                  <div>
+                    <h2 className="font-display text-lg text-slate-100 tracking-wide">🔧 Grid Search Optimizer</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Cari otomatis settingan paling optimal (F1-Score tinggi, Toleransi kecil)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleRunGridSearch}
+                  disabled={isOptimizing || actualReversals.filter(r => r.date).length === 0}
+                  className="flex items-center gap-2 text-sm bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-slate-700 disabled:to-slate-700 text-white px-4 py-2.5 rounded-xl font-bold transition-all duration-300 shadow-lg shadow-amber-600/20 hover:shadow-amber-500/40 disabled:shadow-none hover:scale-[1.02] active:scale-95"
+                >
+                  {isOptimizing ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Mencari...</>
+                  ) : (
+                    <><Search className="w-4 h-4" /> Jalankan Grid Search</>
+                  )}
+                </button>
+              </div>
+
+              {/* Progress Bar */}
+              {isOptimizing && (
+                <div className="mb-4 animate-fade-in">
+                  <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+                    <span>Fase {optimizerProgress.phase || 1}: {optimizerProgress.phase === 2 ? 'Fine Tuning...' : 'Coarse Search...'}</span>
+                    <span className="font-mono-custom text-amber-400">{optimizerProgress.percent || 0}%</span>
+                  </div>
+                  <div className="w-full h-2.5 bg-midnight-800 rounded-full overflow-hidden border border-slate-700/30">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 rounded-full transition-all duration-500 ease-out relative"
+                      style={{ width: `${optimizerProgress.percent || 0}%` }}
+                    >
+                      <div className="absolute inset-0 bg-white/20 animate-pulse" style={{ animationDuration: '1.5s' }} />
+                    </div>
+                  </div>
+                  {optimizerProgress.bestSoFar && (
+                    <p className="text-xs text-slate-500 mt-1.5">
+                      Terbaik sementara: F1-Score <span className="text-emerald-400 font-mono-custom font-bold">{optimizerProgress.bestSoFar.f1.toFixed(1)}%</span> | Toleransi ±{optimizerProgress.bestSoFar.tolerance}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Results */}
+              {gridSearchResult && !isOptimizing && (
+                <div className="animate-fade-in space-y-4">
+                  {/* Stats Summary */}
+                  <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+                    <span>✅ Diuji: <span className="text-amber-400 font-mono-custom font-bold">{gridSearchResult.totalTested}</span> kombinasi</span>
+                    <span>⏱️ Durasi: <span className="text-cyan-400 font-mono-custom font-bold">{gridSearchResult.durationSec}s</span></span>
+                    <span>🔍 Fase 1: {gridSearchResult.coarseTested} | Fase 2: {gridSearchResult.fineTested}</span>
+                  </div>
+
+                  {/* Best Configuration */}
+                  {gridSearchResult.best && (
+                    <div className="bg-gradient-to-br from-amber-950/30 via-midnight-900 to-emerald-950/20 rounded-xl p-5 border border-amber-500/30 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-full blur-2xl" />
+                      <div className="relative">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Trophy className="w-5 h-5 text-amber-400" />
+                          <h3 className="font-display text-base text-amber-300 tracking-wide">Konfigurasi Terbaik</h3>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                          <div className="bg-midnight-950/60 rounded-lg p-3 text-center border border-emerald-500/20">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1">F1-Score</div>
+                            <div className={`font-mono-custom text-xl font-bold ${gridSearchResult.best.f1 >= 50 ? 'text-emerald-300' : gridSearchResult.best.f1 >= 30 ? 'text-amber-300' : 'text-rose-300'}`}>{gridSearchResult.best.f1.toFixed(1)}%</div>
+                          </div>
+                          <div className="bg-midnight-950/60 rounded-lg p-3 text-center border border-indigo-500/20">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1">Precision</div>
+                            <div className="font-mono-custom text-xl font-bold text-indigo-300">{gridSearchResult.best.precision.toFixed(1)}%</div>
+                          </div>
+                          <div className="bg-midnight-950/60 rounded-lg p-3 text-center border border-cyan-500/20">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1">Recall</div>
+                            <div className="font-mono-custom text-xl font-bold text-cyan-300">{gridSearchResult.best.recall.toFixed(1)}%</div>
+                          </div>
+                          <div className="bg-midnight-950/60 rounded-lg p-3 text-center border border-purple-500/20">
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1">Avg Timing</div>
+                            <div className="font-mono-custom text-xl font-bold text-purple-300">{gridSearchResult.best.avgTimingError !== null ? `±${gridSearchResult.best.avgTimingError}` : '—'}</div>
+                          </div>
+                        </div>
+
+                        {/* Parameter Details */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs mb-4">
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30">
+                            <span className="text-slate-500">Toleransi:</span>
+                            <span className="text-amber-400 font-mono-custom font-bold ml-1">±{gridSearchResult.best.params.confluenceTolerance} hari</span>
+                          </div>
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30">
+                            <span className="text-slate-500">Swing:</span>
+                            <span className="text-indigo-400 font-mono-custom font-bold ml-1">{gridSearchResult.best.params.swingLookback} hari</span>
+                          </div>
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30">
+                            <span className="text-slate-500">Min Skor:</span>
+                            <span className="text-rose-400 font-mono-custom font-bold ml-1">{gridSearchResult.best.params.minSignalScore.toFixed(1)}</span>
+                          </div>
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30">
+                            <span className="text-slate-500">Proyeksi:</span>
+                            <span className="text-emerald-400 font-mono-custom font-bold ml-1">{gridSearchResult.best.params.projectionDays} hari</span>
+                          </div>
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30">
+                            <span className="text-slate-500">Zona Fibo:</span>
+                            <span className="text-amber-400 font-mono-custom font-bold ml-1">{gridSearchResult.best.params.dayMode === 'trading' ? 'Hari Bursa' : 'Kalender'}</span>
+                          </div>
+                          <div className="bg-midnight-950/40 rounded-lg px-3 py-2 border border-slate-700/30 sm:col-span-3">
+                            <span className="text-slate-500">Astro:</span>
+                            <span className="text-purple-400 font-mono-custom font-bold ml-1">{formatToggleLabel(gridSearchResult.best.params)}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleApplyBestConfig(gridSearchResult.best)}
+                          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white py-3 rounded-xl font-bold text-sm transition-all duration-300 shadow-lg shadow-emerald-600/20 hover:shadow-emerald-500/40 hover:scale-[1.01] active:scale-[0.99]"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          ✅ Terapkan Settingan Terbaik
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top 5 Alternatives */}
+                  {gridSearchResult.top5 && gridSearchResult.top5.length > 1 && (
+                    <div className="bg-midnight-950/30 rounded-xl p-4 border border-slate-700/30">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Medal className="w-4 h-4 text-slate-400" />
+                        <h3 className="font-display text-sm text-slate-300 tracking-wide">Top 5 Alternatif</h3>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs font-mono-custom min-w-[600px]">
+                          <thead>
+                            <tr className="text-slate-500 text-left border-b border-slate-700/50">
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">#</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">F1</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Prec.</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Recall</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Timing</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Tol.</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Swing</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Min Skor</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Proy.</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Fibo</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider">Astro</th>
+                              <th className="py-1.5 pb-2 font-medium text-[10px] uppercase tracking-wider"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {gridSearchResult.top5.map((r, idx) => (
+                              <tr key={idx} className={`border-b border-slate-700/20 last:border-0 transition-colors ${idx === 0 ? 'bg-amber-500/5' : 'hover:bg-slate-800/30'}`}>
+                                <td className="py-2">
+                                  {idx === 0 ? <span className="text-amber-400">🏆</span> : <span className="text-slate-500">{idx + 1}</span>}
+                                </td>
+                                <td className={`py-2 font-bold ${r.f1 >= 50 ? 'text-emerald-400' : r.f1 >= 30 ? 'text-amber-400' : 'text-rose-400'}`}>{r.f1.toFixed(1)}%</td>
+                                <td className="py-2 text-indigo-300">{r.precision.toFixed(1)}%</td>
+                                <td className="py-2 text-cyan-300">{r.recall.toFixed(1)}%</td>
+                                <td className="py-2 text-purple-300">{r.avgTimingError !== null ? `±${r.avgTimingError}` : '—'}</td>
+                                <td className="py-2 text-amber-300">±{r.params.confluenceTolerance}</td>
+                                <td className="py-2 text-slate-300">{r.params.swingLookback}</td>
+                                <td className="py-2 text-slate-300">{r.params.minSignalScore.toFixed(1)}</td>
+                                <td className="py-2 text-slate-300">{r.params.projectionDays}</td>
+                                <td className="py-2 text-slate-400">{r.params.dayMode === 'trading' ? 'Bursa' : 'Kal.'}</td>
+                                <td className="py-2 text-slate-500 text-[10px] max-w-[80px] truncate">{formatToggleLabel(r.params)}</td>
+                                <td className="py-2">
+                                  <button
+                                    onClick={() => handleApplyBestConfig(r)}
+                                    className="text-[10px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-md border border-emerald-500/20 hover:border-emerald-500/40 transition-all duration-200 font-bold whitespace-nowrap"
+                                  >
+                                    Terapkan
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!gridSearchResult && !isOptimizing && (
+                <div className="text-center py-6">
+                  <Search className="w-10 h-10 text-slate-700 mx-auto mb-3" />
+                  <p className="text-sm text-slate-500">Klik <strong className="text-amber-400">"Jalankan Grid Search"</strong> untuk mencari settingan paling optimal secara otomatis.</p>
+                  <p className="text-xs text-slate-600 mt-1.5">Sistem akan menguji ratusan kombinasi parameter dan mencari F1-Score tertinggi dengan Toleransi terkecil.</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

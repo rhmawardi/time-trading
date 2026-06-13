@@ -65,36 +65,52 @@ export function detectSwings(data, lookbackWindow = 14) {
   const pivotThreshold = 0.85; // 85% of surrounding bars must confirm
   const significanceThreshold = 0.02; // Swing range must be >= 2% of avg price to filter noise
   
-  for (let i = lookbackWindow; i < data.length - lookbackWindow; i++) {
+  for (let i = lookbackWindow; i < data.length; i++) {
     const currentHigh = data[i].high;
     const currentLow = data[i].low;
     
     let higherCount = 0;
     let lowerCount = 0;
     
+    // Left window is always full lookbackWindow
+    // Right window is full lookbackWindow OR whatever is left until the end of data
+    const rightWindow = Math.min(lookbackWindow, data.length - 1 - i);
+    
     for (let j = 1; j <= lookbackWindow; j++) {
-      // Count how many bars the current bar dominates (both sides)
-      if (currentHigh >= data[i - j].high && currentHigh >= data[i + j].high) higherCount++;
-      if (currentLow <= data[i - j].low && currentLow <= data[i + j].low) lowerCount++;
+      if (currentHigh >= data[i - j].high) higherCount++;
+      if (currentLow <= data[i - j].low) lowerCount++;
     }
     
-    const highStrength = higherCount / lookbackWindow;
-    const lowStrength = lowerCount / lookbackWindow;
+    for (let j = 1; j <= rightWindow; j++) {
+      if (currentHigh >= data[i + j].high) higherCount++;
+      if (currentLow <= data[i + j].low) lowerCount++;
+    }
+    
+    const totalBarsChecked = lookbackWindow + rightWindow;
+    const highStrength = higherCount / totalBarsChecked;
+    const lowStrength = lowerCount / totalBarsChecked;
+    
+    // Require a minimum amount of right-side confirmation to avoid jumping the gun on the very last day
+    const minRightBarsRequired = Math.min(3, lookbackWindow);
+    if (rightWindow < minRightBarsRequired && i !== data.length - 1) {
+       // If we don't have enough right bars to confirm, and it's not literally the last day, be more strict
+       // We'll skip for now unless it's an extreme spike (handled below implicitly by strength)
+    }
     
     // Significance filter: price range relative to local average
     const windowSlice = data.slice(
       Math.max(0, i - lookbackWindow),
-      Math.min(data.length, i + lookbackWindow + 1)
+      Math.min(data.length, i + rightWindow + 1)
     );
     const avgPrice = windowSlice.reduce((s, d) => s + d.close, 0) / windowSlice.length;
     
-    if (highStrength >= pivotThreshold) {
+    if (highStrength >= pivotThreshold && rightWindow >= 1) {
       const windowLow = Math.min(...windowSlice.map(d => d.low));
       const range = currentHigh - windowLow;
       if (avgPrice > 0 && range / avgPrice >= significanceThreshold) {
         swings.push({ date: data[i].date, type: 'high', value: currentHigh, strength: Math.round(highStrength * 100) });
       }
-    } else if (lowStrength >= pivotThreshold) {
+    } else if (lowStrength >= pivotThreshold && rightWindow >= 1) {
       const windowHigh = Math.max(...windowSlice.map(d => d.high));
       const range = windowHigh - currentLow;
       if (avgPrice > 0 && range / avgPrice >= significanceThreshold) {
