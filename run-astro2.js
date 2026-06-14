@@ -118,7 +118,7 @@ function getLong(body, days) {
   const T = days / 36525;
   const precession = 1.39697137 * T;
   const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
-  return (siderealLong + precession) % 360;
+  return ((siderealLong + precession) % 360 + 360) % 360;
 }
 
 function getDailyMotion(planet, ms) {

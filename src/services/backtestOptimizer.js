@@ -32,16 +32,18 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
   // ---- Phase 1: Coarse Search ----
   const coarseTolerances = [0, 0.5, 1.0, 1.5, 2.0];
   const coarseSwings = [14]; // swingLookback doesn't affect backtest calculation, hanya untuk Auto-Detect
-  const coarseMinScores = [2.0, 5.0, 8.0, 12.0];
+  const coarseMinScores = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0];
   const coarseProjections = [90, 180, 365];
   const dayModes = ['trading', 'calendar'];
 
-  // Most meaningful toggle combinations (reduced from 8 to 4)
+  // Most meaningful toggle combinations
   const toggleCombos = [
-    { useNatal: true,  useRetrograde: true,  useIngress: true  },
-    { useNatal: true,  useRetrograde: true,  useIngress: false },
-    { useNatal: false, useRetrograde: true,  useIngress: false },
-    { useNatal: false, useRetrograde: false, useIngress: false },
+    { useNatal: true,  useRetrograde: true,  useIngress: true,  useLunarNode: true,  useSpeedExtremes: true  },
+    { useNatal: true,  useRetrograde: true,  useIngress: false, useLunarNode: true,  useSpeedExtremes: false },
+    { useNatal: false, useRetrograde: true,  useIngress: false, useLunarNode: false, useSpeedExtremes: true  },
+    { useNatal: false, useRetrograde: false, useIngress: false, useLunarNode: false, useSpeedExtremes: false },
+    { useNatal: true,  useRetrograde: false, useIngress: true,  useLunarNode: true,  useSpeedExtremes: true  },
+    { useNatal: true,  useRetrograde: true,  useIngress: true,  useLunarNode: false, useSpeedExtremes: false },
   ];
 
   // Build coarse grid
@@ -123,10 +125,10 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
     const p = topResult.params;
 
     // Generate fine-grained neighbors around each top result
-    const fineTols = uniqueClamp([p.confluenceTolerance - 0.5, p.confluenceTolerance, p.confluenceTolerance + 0.5], 0, 2.0);
+    const fineTols = uniqueClamp([p.confluenceTolerance - 0.5, p.confluenceTolerance - 0.25, p.confluenceTolerance, p.confluenceTolerance + 0.25, p.confluenceTolerance + 0.5], 0, 2.0);
     const fineSwings = uniqueClamp([p.swingLookback - 3, p.swingLookback - 1, p.swingLookback, p.swingLookback + 1, p.swingLookback + 3], 5, 30);
     const fineMinScores = uniqueClamp(
-      [p.minSignalScore - 1.5, p.minSignalScore - 0.5, p.minSignalScore, p.minSignalScore + 0.5, p.minSignalScore + 1.5],
+      [p.minSignalScore - 1.0, p.minSignalScore - 0.5, p.minSignalScore, p.minSignalScore + 0.5, p.minSignalScore + 1.0],
       1.0, 15.0
     ).map(v => Math.round(v * 2) / 2);
     const fineProjs = uniqueClamp([p.projectionDays - 30, p.projectionDays, p.projectionDays + 30], 30, 365);
@@ -144,6 +146,8 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
               useNatal: p.useNatal,
               useRetrograde: p.useRetrograde,
               useIngress: p.useIngress,
+              useLunarNode: p.useLunarNode,
+              useSpeedExtremes: p.useSpeedExtremes,
             };
             const key = paramKey(candidate);
             if (!seenKeys.has(key)) {
@@ -231,7 +235,7 @@ function compareResults(a, b) {
 }
 
 function paramKey(p) {
-  return `${p.confluenceTolerance}|${p.swingLookback}|${p.minSignalScore}|${p.projectionDays}|${p.dayMode}|${p.useNatal}|${p.useRetrograde}|${p.useIngress}`;
+  return `${p.confluenceTolerance}|${p.swingLookback}|${p.minSignalScore}|${p.projectionDays}|${p.dayMode}|${p.useNatal}|${p.useRetrograde}|${p.useIngress}|${p.useLunarNode}|${p.useSpeedExtremes}`;
 }
 
 function uniqueClamp(values, min, max) {
@@ -256,5 +260,7 @@ export function formatToggleLabel(params) {
   if (params.useNatal) parts.push('Natal');
   if (params.useRetrograde) parts.push('Retro');
   if (params.useIngress) parts.push('Ingress');
+  if (params.useLunarNode) parts.push('Node');
+  if (params.useSpeedExtremes) parts.push('Speed');
   return parts.length > 0 ? parts.join(' + ') : 'Tanpa Astro Tambahan';
 }

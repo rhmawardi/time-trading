@@ -118,7 +118,7 @@ function getLong(body, days) {
   const T = days / 36525;
   const precession = 1.39697137 * T;
   const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
-  return (siderealLong + precession) % 360;
+  return ((siderealLong + precession) % 360 + 360) % 360;
 }
 
 function getDailyMotion(planet, ms) {
@@ -402,7 +402,7 @@ function getMoonDeclination(days) {
   const epsilon = 23.439291 - 0.0130042 * T;
 
   const sinDec = sind(beta) * cosd(epsilon) + cosd(beta) * sind(epsilon) * sind(lambda);
-  return rad2deg(Math.asin(sinDec));
+  return (Math.asin(sinDec) * 180) / Math.PI;
 }
 
 function computeMoonDeclinationEvents(minMs, maxMs) {

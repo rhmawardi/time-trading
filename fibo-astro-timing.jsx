@@ -42,6 +42,20 @@ const norm180 = (deg) => {
 const cosd = (d) => Math.cos(deg2rad(d));
 const sind = (d) => Math.sin(deg2rad(d));
 
+// Bisection refinement: given two timestamps where a value crosses zero,
+// find the precise crossing time. 8 iterations ≈ 5.6-minute accuracy on 1-day step.
+function bisectCrossing(evalFn, msA, msB, iterations = 8) {
+  let lo = msA, hi = msB;
+  const vA = evalFn(lo);
+  for (let i = 0; i < iterations; i++) {
+    const mid = (lo + hi) / 2;
+    const vMid = evalFn(mid);
+    if (vA * vMid <= 0) hi = mid;
+    else lo = mid;
+  }
+  return Math.round((lo + hi) / 2);
+}
+
 // Mean anomaly helper
 function meanAnomaly(p, days) {
   return (((p.L0 + p.n * days - p.peri) % 360) + 360) % 360;
@@ -129,7 +143,7 @@ function getLong(body, days) {
   const T = days / 36525;
   const precession = 1.39697137 * T;
   const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
-  return (siderealLong + precession) % 360;
+  return ((siderealLong + precession) % 360 + 360) % 360;
 }
 
 function getDailyMotion(planet, ms) {
@@ -148,20 +162,26 @@ function computeRetrogradeEvents(minMs, maxMs) {
       const m2 = getDailyMotion(planet, ms);
       
       if (m1 >= 0 && m2 < 0) {
-        const shift = Math.abs(m1) < Math.abs(m2) ? -DAY_MS : 0;
+        const preciseMs = bisectCrossing(
+          (t) => getDailyMotion(planet, t),
+          ms - DAY_MS, ms
+        );
         events.push({
-          ms: ms + shift,
-          date: new Date(ms + shift).toISOString().slice(0, 10),
+          ms: preciseMs,
+          date: new Date(preciseMs).toISOString().slice(0, 10),
           type: 'retro',
           label: `${planet} Station Retrograde`,
           planet,
           weight: 2.5
         });
       } else if (m1 < 0 && m2 >= 0) {
-        const shift = Math.abs(m1) < Math.abs(m2) ? -DAY_MS : 0;
+        const preciseMs = bisectCrossing(
+          (t) => getDailyMotion(planet, t),
+          ms - DAY_MS, ms
+        );
         events.push({
-          ms: ms + shift,
-          date: new Date(ms + shift).toISOString().slice(0, 10),
+          ms: preciseMs,
+          date: new Date(preciseMs).toISOString().slice(0, 10),
           type: 'retro',
           label: `${planet} Station Direct`,
           planet,
@@ -190,9 +210,23 @@ function computeIngressEvents(minMs, maxMs) {
       
       if (sPrev !== sCurr) {
         const signName = SIGNS[sCurr];
+        // Bisect to find precise sign-boundary crossing
+        const boundary = sCurr * 30;
+        const preciseMs = bisectCrossing(
+          (t) => {
+            const days = (t - J2000) / DAY_MS;
+            const lon = getLong(planet, days);
+            // Distance from boundary, wrapping correctly
+            let diff = lon - boundary;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            return diff;
+          },
+          ms - DAY_MS, ms
+        );
         events.push({
-          ms,
-          date: new Date(ms).toISOString().slice(0, 10),
+          ms: preciseMs,
+          date: new Date(preciseMs).toISOString().slice(0, 10),
           type: 'ingress',
           label: `Ingress: ${planet} ➔ ${signName}`,
           weight: 1.5
@@ -421,44 +455,54 @@ function computeMoonDeclinationEvents(minMs, maxMs) {
   const startDays = (minMs - J2000) / DAY_MS - 1;
   const maxDays = Math.ceil((maxMs - minMs) / DAY_MS) + 1;
   
+  // Helper: get declination from milliseconds timestamp
+  const decAtMs = (t) => getMoonDeclination((t - J2000) / DAY_MS);
+  
   let prevDec = null;
   let prevTrend = null; // 1 for up, -1 for down
   
   for (let d = 0; d <= maxDays; d++) {
     const dec = getMoonDeclination(startDays + d);
     if (d > 0) {
-      const ms = minMs + (d - 1) * DAY_MS;
-      const date = new Date(ms);
+      const msA = minMs + (d - 2) * DAY_MS; // start of interval
+      const msB = minMs + (d - 1) * DAY_MS; // end of interval
       
       if (prevDec !== null) {
-        // Zero cross
+        // Zero cross — bisect to find precise equatorial crossing
         if ((prevDec >= 0 && dec < 0) || (prevDec < 0 && dec >= 0)) {
-          const shift = Math.abs(dec) < Math.abs(prevDec) ? 1 : 0;
-          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Melintasi Ekuator (0°)', weight: 1.5 });
+          const preciseMs = bisectCrossing((t) => decAtMs(t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: 'Deklinasi: Melintasi Ekuator (0°)', weight: 1.5 });
         }
         
-        // OOB cross
+        // OOB cross — bisect to find precise boundary crossing
         if (prevDec < 23.44 && dec >= 23.44) {
-          const shift = Math.abs(dec - 23.44) < Math.abs(prevDec - 23.44) ? 1 : 0;
-          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: OOB Utara (> 23.44°)', weight: 2.0 });
+          const preciseMs = bisectCrossing((t) => decAtMs(t) - 23.44, msA, msB);
+          events.push({ date: new Date(preciseMs), label: 'Deklinasi: OOB Utara (> 23.44°)', weight: 2.0 });
         } else if (prevDec >= 23.44 && dec < 23.44) {
-          const shift = Math.abs(dec - 23.44) < Math.abs(prevDec - 23.44) ? 1 : 0;
-          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Re-enter dari Utara', weight: 2.5 });
+          const preciseMs = bisectCrossing((t) => decAtMs(t) - 23.44, msA, msB);
+          events.push({ date: new Date(preciseMs), label: 'Deklinasi: Re-enter dari Utara', weight: 2.5 });
         } else if (prevDec > -23.44 && dec <= -23.44) {
-          const shift = Math.abs(dec + 23.44) < Math.abs(prevDec + 23.44) ? 1 : 0;
-          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: OOB Selatan (< -23.44°)', weight: 2.0 });
+          const preciseMs = bisectCrossing((t) => decAtMs(t) + 23.44, msA, msB);
+          events.push({ date: new Date(preciseMs), label: 'Deklinasi: OOB Selatan (< -23.44°)', weight: 2.0 });
         } else if (prevDec <= -23.44 && dec > -23.44) {
-          const shift = Math.abs(dec + 23.44) < Math.abs(prevDec + 23.44) ? 1 : 0;
-          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Re-enter dari Selatan', weight: 2.5 });
+          const preciseMs = bisectCrossing((t) => decAtMs(t) + 23.44, msA, msB);
+          events.push({ date: new Date(preciseMs), label: 'Deklinasi: Re-enter dari Selatan', weight: 2.5 });
         }
         
-        // Maxima / Minima
+        // Maxima / Minima — bisect using derivative (dec difference) to find exact peak
         const trend = dec > prevDec ? 1 : -1;
         if (prevTrend !== null && trend !== prevTrend) {
+          // Peak is between msA and msB; find where derivative ≈ 0
+          const HALF_HOUR = 1800000;
+          const preciseMs = bisectCrossing(
+            (t) => decAtMs(t + HALF_HOUR) - decAtMs(t - HALF_HOUR), 
+            msA, msB
+          );
+          const peakDec = decAtMs(preciseMs);
           if (prevTrend === 1) {
-            events.push({ date, label: `Deklinasi: Maksimum Utara (${prevDec.toFixed(1)}°)`, weight: 3.0 });
+            events.push({ date: new Date(preciseMs), label: `Deklinasi: Maksimum Utara (${peakDec.toFixed(1)}°)`, weight: 3.0 });
           } else {
-            events.push({ date, label: `Deklinasi: Maksimum Selatan (${prevDec.toFixed(1)}°)`, weight: 3.0 });
+            events.push({ date: new Date(preciseMs), label: `Deklinasi: Maksimum Selatan (${peakDec.toFixed(1)}°)`, weight: 3.0 });
           }
         }
         prevTrend = trend;
@@ -503,48 +547,57 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
     const isMajorPair = MAJOR_FINANCIAL_PAIRS.has(pair.label);
     let prevConj = null, prevOpp = null, prevSq1 = null, prevSq2 = null, prevTri1 = null, prevTri2 = null, prevSex1 = null, prevSex2 = null;
     
+    // Bisection helper for this pair: evaluates aspect angle at any ms
+    const aspectAt = (aspect, ms) => {
+      const days = (ms - J2000) / DAY_MS;
+      return norm180(getLong(pair.a, days) - getLong(pair.b, days) - aspect);
+    };
+    
     for (let d = 0; d <= maxDays; d++) {
       const la = ephemeris[d][pair.a];
       const lb = ephemeris[d][pair.b];
       const conj = norm180(la - lb), opp = norm180(la - lb - 180), sq1 = norm180(la - lb - 90), sq2 = norm180(la - lb + 90), tri1 = norm180(la - lb - 120), tri2 = norm180(la - lb + 120), sex1 = norm180(la - lb - 60), sex2 = norm180(la - lb + 60);
       
       if (d > 0) {
-        const checkCross = (p, c) => {
-          if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
-            return Math.abs(p) < Math.abs(c) ? -1 : 0;
-          }
-          return null;
-        };
+        const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+        const msA = minAnchorMs + (d - 1) * DAY_MS;
+        const msB = minAnchorMs + d * DAY_MS;
         
         // Conjunction & Opposition: all pairs (high significance)
-        const cConj = checkCross(prevConj, conj);
-        if (cConj !== null) events.push({ date: new Date(minAnchorMs + (d + cConj) * DAY_MS), label: `Konjungsi (0°): ${pair.label}`, weight: 3.0 });
-        
-        const cOpp = checkCross(prevOpp, opp);
-        if (cOpp !== null) events.push({ date: new Date(minAnchorMs + (d + cOpp) * DAY_MS), label: `Oposisi (180°): ${pair.label}`, weight: 2.5 });
+        if (isCross(prevConj, conj)) {
+          const preciseMs = bisectCrossing((t) => aspectAt(0, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Konjungsi (0°): ${pair.label}`, weight: 3.0 });
+        }
+        if (isCross(prevOpp, opp)) {
+          const preciseMs = bisectCrossing((t) => aspectAt(180, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Oposisi (180°): ${pair.label}`, weight: 2.5 });
+        }
         
         // Square: all pairs (medium significance)
-        const cSq1 = checkCross(prevSq1, sq1);
-        const cSq2 = checkCross(prevSq2, sq2);
-        if (cSq1 !== null || cSq2 !== null) {
-          const shift = cSq1 !== null ? cSq1 : cSq2;
-          events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Square (90°): ${pair.label}`, weight: 1.5 });
+        if (isCross(prevSq1, sq1)) {
+          const preciseMs = bisectCrossing((t) => aspectAt(90, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Square (90°): ${pair.label}`, weight: 1.5 });
+        } else if (isCross(prevSq2, sq2)) {
+          const preciseMs = bisectCrossing((t) => aspectAt(-90, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Square (90°): ${pair.label}`, weight: 1.5 });
         }
         
         // Trine & Sextile: only major financial pairs (reduces noise drastically)
         if (isMajorPair) {
-          const cTri1 = checkCross(prevTri1, tri1);
-          const cTri2 = checkCross(prevTri2, tri2);
-          if (cTri1 !== null || cTri2 !== null) {
-            const shift = cTri1 !== null ? cTri1 : cTri2;
-            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
+          if (isCross(prevTri1, tri1)) {
+            const preciseMs = bisectCrossing((t) => aspectAt(120, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
+          } else if (isCross(prevTri2, tri2)) {
+            const preciseMs = bisectCrossing((t) => aspectAt(-120, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
           }
           
-          const cSex1 = checkCross(prevSex1, sex1);
-          const cSex2 = checkCross(prevSex2, sex2);
-          if (cSex1 !== null || cSex2 !== null) {
-            const shift = cSex1 !== null ? cSex1 : cSex2;
-            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
+          if (isCross(prevSex1, sex1)) {
+            const preciseMs = bisectCrossing((t) => aspectAt(60, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
+          } else if (isCross(prevSex2, sex2)) {
+            const preciseMs = bisectCrossing((t) => aspectAt(-60, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
           }
         }
       }
@@ -552,6 +605,115 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
     }
   }
   return events.sort((x, y) => x.date.getTime() - y.date.getTime());
+}
+
+function computeLunarNodeEvents(minMs, maxMs) {
+  const events = [];
+  const startDays = (minMs - J2000) / DAY_MS - 1;
+  const maxDays = Math.ceil((maxMs - minMs) / DAY_MS) + 1;
+  
+  const nodeAspectAt = (planet, aspect, ms) => {
+    const days = (ms - J2000) / DAY_MS;
+    const T = days / 36525;
+    const nodeLong = ((125.0445 - 1934.1363 * T) % 360 + 360) % 360;
+    return norm180(getLong(planet, days) - nodeLong - aspect);
+  };
+
+  const planets = ['Sun', 'Mars', 'Jupiter', 'Saturn'];
+  const prevVals = {};
+  planets.forEach(p => prevVals[p] = { conj: null, opp: null, sq1: null, sq2: null });
+
+  for (let d = 0; d <= maxDays; d++) {
+    const msA = minMs + (d - 2) * DAY_MS;
+    const msB = minMs + (d - 1) * DAY_MS;
+    
+    planets.forEach(planet => {
+      const days = startDays + d;
+      const T = days / 36525;
+      const nodeLong = ((125.0445 - 1934.1363 * T) % 360 + 360) % 360;
+      const pLong = getLong(planet, days);
+      
+      const conj = norm180(pLong - nodeLong);
+      const opp = norm180(pLong - nodeLong - 180);
+      const sq1 = norm180(pLong - nodeLong - 90);
+      const sq2 = norm180(pLong - nodeLong + 90);
+      
+      if (d > 0) {
+        const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+        const prev = prevVals[planet];
+        
+        if (isCross(prev.conj, conj)) {
+          const preciseMs = bisectCrossing((t) => nodeAspectAt(planet, 0, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Node: Konjungsi (0°) ${planet}-NorthNode`, weight: 2.5 });
+        }
+        if (isCross(prev.opp, opp)) {
+          const preciseMs = bisectCrossing((t) => nodeAspectAt(planet, 180, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Node: Oposisi (180°) ${planet}-NorthNode`, weight: 2.5 });
+        }
+        if (isCross(prev.sq1, sq1)) {
+          const preciseMs = bisectCrossing((t) => nodeAspectAt(planet, 90, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Node: Square (90°) ${planet}-NorthNode`, weight: 1.5 });
+        } else if (isCross(prev.sq2, sq2)) {
+          const preciseMs = bisectCrossing((t) => nodeAspectAt(planet, -90, t), msA, msB);
+          events.push({ date: new Date(preciseMs), label: `Node: Square (90°) ${planet}-NorthNode`, weight: 1.5 });
+        }
+      }
+      prevVals[planet] = { conj, opp, sq1, sq2 };
+    });
+  }
+  return events.filter(e => e.date.getTime() >= minMs && e.date.getTime() <= maxMs).sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+function computeSpeedExtremeEvents(minMs, maxMs) {
+  const events = [];
+  const startDays = (minMs - J2000) / DAY_MS - 1;
+  const maxDays = Math.ceil((maxMs - minMs) / DAY_MS) + 1;
+  
+  const planets = ['Mercury', 'Venus', 'Mars']; // Fast planets mostly
+  const prevSpeed = {};
+  const prevTrend = {}; // 1 for accelerating, -1 for decelerating
+  
+  const speedAtMs = (planet, t) => {
+    // Speed is difference in longitude over a small time step (e.g. 1 hour)
+    const t1 = (t - 1800000 - J2000) / DAY_MS;
+    const t2 = (t + 1800000 - J2000) / DAY_MS;
+    return norm180(getLong(planet, t2) - getLong(planet, t1));
+  };
+  
+  for (let d = 0; d <= maxDays; d++) {
+    const msA = minMs + (d - 2) * DAY_MS;
+    const msB = minMs + (d - 1) * DAY_MS;
+    
+    planets.forEach(planet => {
+      const days = startDays + d;
+      // Coarse speed
+      const s1 = getLong(planet, days - 0.5);
+      const s2 = getLong(planet, days + 0.5);
+      const speed = norm180(s2 - s1);
+      
+      if (d > 0) {
+        const prevS = prevSpeed[planet];
+        const trend = speed > prevS ? 1 : -1;
+        
+        if (prevTrend[planet] !== undefined && trend !== prevTrend[planet]) {
+          // Extremum found! Bisect acceleration = 0
+          // Acceleration ≈ speed(t+1hr) - speed(t-1hr)
+          const preciseMs = bisectCrossing(
+            (t) => speedAtMs(planet, t + 3600000) - speedAtMs(planet, t - 3600000),
+            msA, msB
+          );
+          if (prevTrend[planet] === 1) {
+            events.push({ date: new Date(preciseMs), label: `Speed: Maksimum ${planet}`, weight: 1.5 });
+          } else {
+            events.push({ date: new Date(preciseMs), label: `Speed: Minimum ${planet}`, weight: 1.5 });
+          }
+        }
+        prevTrend[planet] = trend;
+      }
+      prevSpeed[planet] = speed;
+    });
+  }
+  return events.filter(e => e.date.getTime() >= minMs && e.date.getTime() <= maxMs).sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
 function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
@@ -592,10 +754,16 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
       // Skip fast-fast combos that happen too often, focus on slow planets or same planet return
       if (['Mercury', 'Venus'].includes(tPlanet) && tPlanet !== nPlanet) continue;
       
+      const nLong = natalPos[nPlanet];
+      // Bisection helper for this transit-natal pair
+      const natalAspectAt = (aspect, ms) => {
+        const days = (ms - J2000) / DAY_MS;
+        return norm180(getLong(tPlanet, days) - nLong - aspect);
+      };
+      
       let prevConj = null, prevOpp = null, prevSq1 = null, prevSq2 = null, prevTri1 = null, prevTri2 = null, prevSex1 = null, prevSex2 = null;
       for (let d = 0; d <= maxDays; d++) {
         const tLong = ephemeris[d][tPlanet];
-        const nLong = natalPos[nPlanet];
         
         const conj = norm180(tLong - nLong);
         const opp = norm180(tLong - nLong - 180);
@@ -607,40 +775,43 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         const sex2 = norm180(tLong - nLong + 60);
         
         if (d > 0) {
-          const checkCross = (p, c) => {
-            if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
-              return Math.abs(p) < Math.abs(c) ? -1 : 0;
-            }
-            return null;
-          };
+          const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+          const msA = minAnchorMs + (d - 1) * DAY_MS;
+          const msB = minAnchorMs + d * DAY_MS;
           
           const labelPrefix = `Tr. ${tPlanet} ➔ Nat. ${nPlanet}`;
           
-          const cConj = checkCross(prevConj, conj);
-          if (cConj !== null) events.push({ date: new Date(minAnchorMs + (d + cConj) * DAY_MS), label: `Natal: Konjungsi (0°) ${labelPrefix}`, weight: 3.5 });
-          
-          const cOpp = checkCross(prevOpp, opp);
-          if (cOpp !== null) events.push({ date: new Date(minAnchorMs + (d + cOpp) * DAY_MS), label: `Natal: Oposisi (180°) ${labelPrefix}`, weight: 3.0 });
-          
-          const cSq1 = checkCross(prevSq1, sq1);
-          const cSq2 = checkCross(prevSq2, sq2);
-          if (cSq1 !== null || cSq2 !== null) {
-            const shift = cSq1 !== null ? cSq1 : cSq2;
-            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Square (90°) ${labelPrefix}`, weight: 2.0 });
+          if (isCross(prevConj, conj)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(0, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Konjungsi (0°) ${labelPrefix}`, weight: 3.5 });
+          }
+          if (isCross(prevOpp, opp)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(180, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Oposisi (180°) ${labelPrefix}`, weight: 3.0 });
           }
           
-          const cTri1 = checkCross(prevTri1, tri1);
-          const cTri2 = checkCross(prevTri2, tri2);
-          if (cTri1 !== null || cTri2 !== null) {
-            const shift = cTri1 !== null ? cTri1 : cTri2;
-            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Trine (120°) ${labelPrefix}`, weight: 1.2 });
+          if (isCross(prevSq1, sq1)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(90, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Square (90°) ${labelPrefix}`, weight: 2.0 });
+          } else if (isCross(prevSq2, sq2)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(-90, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Square (90°) ${labelPrefix}`, weight: 2.0 });
           }
           
-          const cSex1 = checkCross(prevSex1, sex1);
-          const cSex2 = checkCross(prevSex2, sex2);
-          if (cSex1 !== null || cSex2 !== null) {
-            const shift = cSex1 !== null ? cSex1 : cSex2;
-            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Sextile (60°) ${labelPrefix}`, weight: 0.5 });
+          if (isCross(prevTri1, tri1)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(120, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Trine (120°) ${labelPrefix}`, weight: 1.2 });
+          } else if (isCross(prevTri2, tri2)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(-120, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Trine (120°) ${labelPrefix}`, weight: 1.2 });
+          }
+          
+          if (isCross(prevSex1, sex1)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(60, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Sextile (60°) ${labelPrefix}`, weight: 0.5 });
+          } else if (isCross(prevSex2, sex2)) {
+            const preciseMs = bisectCrossing((t) => natalAspectAt(-60, t), msA, msB);
+            events.push({ date: new Date(preciseMs), label: `Natal: Sextile (60°) ${labelPrefix}`, weight: 0.5 });
           }
         }
         prevConj = conj; prevOpp = opp; prevSq1 = sq1; prevSq2 = sq2; prevTri1 = tri1; prevTri2 = tri2; prevSex1 = sex1; prevSex2 = sex2;
@@ -650,7 +821,7 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
   return events.sort((x, y) => x.date.getTime() - y.date.getTime());
 }
 
-function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, tolerance) {
+function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, lunarNodeEvents, speedEvents, tolerance) {
   const all = [
     ...fibZones.map((f) => ({ date: f.date, ms: f.ms, label: f.label, type: 'fibo', weight: 3.0, anchorId: f.anchorId })),
     ...interFibZones.map((f) => ({ date: f.date, ms: f.ms, label: f.label, type: 'interfibo', weight: f.weight || 2.5, anchorId: f.anchorId })),
@@ -659,22 +830,35 @@ function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, nata
     ...(natalEvents || []).map((n) => ({ date: n.date, ms: n.date.getTime(), label: n.label, type: 'natal', weight: n.weight || 2.5 })),
     ...(retroEvents || []).map((r) => ({ date: new Date(r.ms), ms: r.ms, label: r.label, type: 'retro', weight: r.weight || 2.0 })),
     ...(ingressEvents || []).map((i) => ({ date: new Date(i.ms), ms: i.ms, label: i.label, type: 'ingress', weight: i.weight || 1.5 })),
+    ...(lunarNodeEvents || []).map((n) => ({ date: new Date(n.date), ms: n.date.getTime(), label: n.label, type: 'node', weight: n.weight || 2.0 })),
+    ...(speedEvents || []).map((s) => ({ date: new Date(s.date), ms: s.date.getTime(), label: s.label, type: 'speed', weight: s.weight || 1.5 })),
   ].sort((a, b) => a.ms - b.ms);
 
   const clusters = [];
   let current = [];
+  let currentCenter = 0; // weighted center
+  let currentTotalWeight = 0;
+  
   for (const ev of all) {
     if (current.length === 0) {
       current.push(ev);
+      currentCenter = ev.ms;
+      currentTotalWeight = ev.weight || 1.0;
     } else {
-      const distFromLast = (ev.ms - current[current.length - 1].ms) / DAY_MS;
-      const totalSpan = (ev.ms - current[0].ms) / DAY_MS;
-      // Event must be within tolerance of the last event AND total span must not exceed tolerance * 2
-      if (distFromLast <= tolerance && totalSpan <= tolerance * 2) {
+      // Distance from weighted center (not from last event)
+      const distFromCenter = Math.abs(ev.ms - currentCenter) / DAY_MS;
+      
+      if (distFromCenter <= tolerance) {
         current.push(ev);
+        // Update weighted center
+        const w = ev.weight || 1.0;
+        currentCenter = (currentCenter * currentTotalWeight + ev.ms * w) / (currentTotalWeight + w);
+        currentTotalWeight += w;
       } else {
         if (current.length >= 2) clusters.push(current);
         current = [ev];
+        currentCenter = ev.ms;
+        currentTotalWeight = ev.weight || 1.0;
       }
     }
   }
@@ -682,7 +866,13 @@ function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, nata
   return { all, clusters };
 }
 
-function rankClusters(clusters) {
+function rankClusters(clusters, astroCycleStats = []) {
+  // Build hitRate lookup map
+  const hitRateMap = new Map();
+  astroCycleStats.forEach(s => {
+    if (s.total >= 3) hitRateMap.set(s.label, s.hitRate / 100);
+  });
+  
   return clusters.map(c => {
     let weightedScore = 0;
     let fiboCount = 0;
@@ -691,6 +881,8 @@ function rankClusters(clusters) {
     let natalCount = 0;
     let retroCount = 0;
     let ingressCount = 0;
+    let nodeCount = 0;
+    let speedCount = 0;
     const typesPresent = new Set();
     const uniqueAnchors = new Set();
     
@@ -698,8 +890,17 @@ function rankClusters(clusters) {
     
     c.forEach(ev => {
       const type = ev.type;
+      
+      // Adjust weight by historical hit rate if available
+      const historicalHR = hitRateMap.get(ev.label);
+      let adjustedWeight = ev.weight || 1.0;
+      if (historicalHR !== undefined) {
+        // Blend: 60% original weight + 40% learned weight
+        adjustedWeight = adjustedWeight * 0.6 + adjustedWeight * historicalHR * 2.0 * 0.4;
+      }
+      
       if (!weightsByType[type]) weightsByType[type] = [];
-      weightsByType[type].push(ev.weight || 1.0);
+      weightsByType[type].push(adjustedWeight);
       
       typesPresent.add(type);
       if (ev.anchorId) uniqueAnchors.add(ev.anchorId);
@@ -710,25 +911,20 @@ function rankClusters(clusters) {
       if (type === 'natal') natalCount++;
       if (type === 'retro') retroCount++;
       if (type === 'ingress') ingressCount++;
+      if (type === 'node') nodeCount++;
+      if (type === 'speed') speedCount++;
     });
     
-    // Calculate weighted score with diminishing returns for events of the same type
+    // Calculate weighted score with aggressive exponential diminishing returns
     for (const type in weightsByType) {
-      // Sort weights descending so strongest events contribute most
       const sortedWeights = weightsByType[type].sort((a, b) => b - a);
-      
       sortedWeights.forEach((w, idx) => {
-        let multiplier = 1.0;
-        if (idx === 1) multiplier = 0.75;
-        else if (idx === 2) multiplier = 0.50;
-        else if (idx >= 3) multiplier = 0.25;
-        
+        const multiplier = Math.pow(0.6, idx); // 1.0, 0.6, 0.36, 0.216, ...
         weightedScore += w * multiplier;
       });
     }
     
     // Diversity bonus: non-linear exponential scaling for robust confluence
-    // 1 type = 1.0x, 2 types = ~1.2x, 3 types = ~1.56x, 4 types = ~2.04x
     const diversityMultiplier = 1 + Math.pow(typesPresent.size - 1, 1.5) * 0.2;
     
     // Multi-anchor bonus: Fibo from different anchors is more meaningful
@@ -736,14 +932,20 @@ function rankClusters(clusters) {
     
     let rawScore = weightedScore * diversityMultiplier * anchorBonus;
     
+    // Time-tightness bonus: events that cluster within tight window are more reliable
+    const spanDays = (c[c.length - 1].ms - c[0].ms) / DAY_MS;
+    const tightnessBonus = spanDays < 0.5 ? 1.3 : 
+                           spanDays < 1.0 ? 1.15 : 
+                           spanDays < 1.5 ? 1.05 : 1.0;
+    rawScore *= tightnessBonus;
+    
     // Synergy Check: Fibo + Astro combinations yield the highest accuracy
     const hasFibo = typesPresent.has('fibo') || typesPresent.has('interfibo');
-    const hasAstro = typesPresent.has('bulan') || typesPresent.has('planet') || typesPresent.has('retro') || typesPresent.has('ingress') || typesPresent.has('natal');
+    const hasAstro = typesPresent.has('bulan') || typesPresent.has('planet') || typesPresent.has('retro') || typesPresent.has('ingress') || typesPresent.has('natal') || typesPresent.has('node') || typesPresent.has('speed');
     
     if (hasFibo && hasAstro) {
       rawScore *= 1.5; // High confidence synergy
     } else if (!hasFibo) {
-      // Jika klaster astrologi murni memiliki kekuatan sinyal tinggi (raw score >= 5.0), tidak dipenalti
       if (rawScore < 5.0) rawScore *= 0.8; 
     } else if (!hasAstro) {
       rawScore *= 0.8; // Fibo without Astro is less reliable
@@ -760,6 +962,8 @@ function rankClusters(clusters) {
       natalCount,
       retroCount,
       ingressCount,
+      nodeCount,
+      speedCount,
       diversityTypes: typesPresent.size,
       uniqueAnchors: uniqueAnchors.size,
       ms: c[0].ms,
@@ -769,9 +973,7 @@ function rankClusters(clusters) {
     };
   }).sort((a, b) => {
     if (b.score === a.score) {
-      // Tie-breaker 1: more diverse signal types win
       if (b.diversityTypes !== a.diversityTypes) return b.diversityTypes - a.diversityTypes;
-      // Tie-breaker 2: more events
       return b.events.length - a.events.length;
     }
     return b.score - a.score;
@@ -790,8 +992,12 @@ function computeBacktest(clusters, actualReversals, tolerance) {
   const timingErrors = [];
   
   const details = clusters.map(c => {
-    const totalWeight = c.reduce((sum, ev) => sum + (ev.weight || 1.0), 0);
-    const clusterCenter = c.reduce((sum, ev) => sum + ev.ms * (ev.weight || 1.0), 0) / totalWeight;
+    // Use only top-weight events for centroid (filter out noise)
+    const topEvents = c.filter(ev => (ev.weight || 1.0) >= 1.0); // ignore tiny-weight events
+    const effectiveEvents = topEvents.length >= 2 ? topEvents : c;
+    const totalWeight = effectiveEvents.reduce((sum, ev) => sum + (ev.weight || 1.0), 0);
+    const clusterCenter = effectiveEvents.reduce((sum, ev) => 
+      sum + ev.ms * (ev.weight || 1.0), 0) / totalWeight;
     const minC = clusterCenter - tolerance * DAY_MS;
     const maxC = clusterCenter + tolerance * DAY_MS;
     
@@ -1093,6 +1299,8 @@ export default function App() {
   const [useNatal, setUseNatal] = useLocalStorage('fibo-astro-use-natal', true);
   const [useRetrograde, setUseRetrograde] = useLocalStorage('fibo-astro-use-retro', true);
   const [useIngress, setUseIngress] = useLocalStorage('fibo-astro-use-ingress', false);
+  const [useLunarNode, setUseLunarNode] = useLocalStorage('fibo-astro-use-node', true);
+  const [useSpeedExtremes, setUseSpeedExtremes] = useLocalStorage('fibo-astro-use-speed', true);
   const [minSignalScore, setMinSignalScore] = useLocalStorage('fibo-astro-min-score', 6.0);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [activeTab, setActiveTab] = useState('settings');
@@ -1166,13 +1374,14 @@ export default function App() {
   const natalEvents = useMemo(() => useNatal ? computeNatalEvents(ticker, minAnchorMs, maxTargetMs) : [], [useNatal, ticker, minAnchorMs, maxTargetMs]);
   const retroEvents = useMemo(() => useRetrograde ? computeRetrogradeEvents(minAnchorMs, maxTargetMs) : [], [useRetrograde, minAnchorMs, maxTargetMs]);
   const ingressEvents = useMemo(() => useIngress ? computeIngressEvents(minAnchorMs, maxTargetMs) : [], [useIngress, minAnchorMs, maxTargetMs]);
+  const lunarNodeEvents = useMemo(() => useLunarNode ? computeLunarNodeEvents(minAnchorMs, maxTargetMs) : [], [useLunarNode, minAnchorMs, maxTargetMs]);
+  const speedEvents = useMemo(() => useSpeedExtremes ? computeSpeedExtremeEvents(minAnchorMs, maxTargetMs) : [], [useSpeedExtremes, minAnchorMs, maxTargetMs]);
   
   const { all, clusters } = useMemo(
-    () => buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, confluenceTolerance),
-    [fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, confluenceTolerance]
+    () => buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, lunarNodeEvents, speedEvents, confluenceTolerance),
+    [fibZones, interFibZones, moonEvents, planetEvents, natalEvents, retroEvents, ingressEvents, lunarNodeEvents, speedEvents, confluenceTolerance]
   );
   
-  const ranked = useMemo(() => rankClusters(clusters), [clusters]);
   const astroCycleStats = useMemo(() => {
     if (!all || all.length === 0 || !actualReversals || actualReversals.length === 0) return [];
     
@@ -1187,8 +1396,6 @@ export default function App() {
       if (ev.type === 'fibo' || ev.type === 'interfibo') return;
       
       // HANYA evaluasi statistik berdasarkan event masa lalu.
-      // Jika event terjadi di masa depan (melebihi data reversal terakhir), 
-      // abaikan dari perhitungan agar tidak merusak (menurunkan) nilai Hit Rate.
       if (ev.ms > maxRevMs + (confluenceTolerance * DAY_MS)) return;
 
       if (!statsMap.has(ev.label)) {
@@ -1210,6 +1417,8 @@ export default function App() {
     
     return statsArr.sort((a, b) => b.hitRate - a.hitRate || b.hits - a.hits);
   }, [all, actualReversals, confluenceTolerance]);
+
+  const ranked = useMemo(() => rankClusters(clusters, astroCycleStats), [clusters, astroCycleStats]);
 
   const topPicks = useMemo(() => {
     const todayMs = new Date().setHours(0, 0, 0, 0);
@@ -1289,6 +1498,8 @@ export default function App() {
               natalEvents: computeNatalEvents(ticker, testMinAnchorMs, testMaxTargetMs),
               retroEvents: computeRetrogradeEvents(testMinAnchorMs, testMaxTargetMs),
               ingressEvents: computeIngressEvents(testMinAnchorMs, testMaxTargetMs),
+              lunarNodeEvents: computeLunarNodeEvents(testMinAnchorMs, testMaxTargetMs),
+              speedEvents: computeSpeedExtremeEvents(testMinAnchorMs, testMaxTargetMs),
               interFibZones: computeInterAnchorFib(parsedAnchors, testMinAnchorMs, testMaxTargetMs),
             };
             astroCache.set(astroKey, astro);
@@ -1308,6 +1519,8 @@ export default function App() {
             params.useNatal ? astro.natalEvents : [],
             params.useRetrograde ? astro.retroEvents : [],
             params.useIngress ? astro.ingressEvents : [],
+            params.useLunarNode ? astro.lunarNodeEvents : [],
+            params.useSpeedExtremes ? astro.speedEvents : [],
             params.confluenceTolerance
           );
           const testRanked = rankClusters(testClusters);
@@ -1338,6 +1551,8 @@ export default function App() {
     setUseNatal(p.useNatal);
     setUseRetrograde(p.useRetrograde);
     setUseIngress(p.useIngress);
+    setUseLunarNode(p.useLunarNode);
+    setUseSpeedExtremes(p.useSpeedExtremes);
   }, []);
 
   const handleAutoDetect = async (strategy = 'normal') => {
@@ -1557,11 +1772,11 @@ export default function App() {
             <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-700/50 to-transparent" />
 
             {/* Baris 2: Toggle Indikator Astro & Fibo */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-5">
               <div className="flex flex-col gap-1.5 text-sm text-slate-400">
                 <span>Satuan Zona Fibo</span>
                 <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setDayMode('trading')} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'trading' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Hari Bursa</button>
+                  <button type="button" onClick={() => setDayMode('trading')} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'trading' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Bursa</button>
                   <button type="button" onClick={() => setDayMode('calendar')} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'calendar' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Kalender</button>
                 </div>
               </div>
@@ -1584,6 +1799,20 @@ export default function App() {
                 <div className="flex gap-2 mt-1">
                   <button type="button" onClick={() => setUseIngress(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useIngress ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
                   <button type="button" onClick={() => setUseIngress(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useIngress ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
+                <span>Lunar Node</span>
+                <div className="flex gap-2 mt-1">
+                  <button type="button" onClick={() => setUseLunarNode(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useLunarNode ? 'bg-cyan-500 text-white border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseLunarNode(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useLunarNode ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
+                <span>Speed Extremes</span>
+                <div className="flex gap-2 mt-1">
+                  <button type="button" onClick={() => setUseSpeedExtremes(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useSpeedExtremes ? 'bg-pink-500 text-white border-pink-500 shadow-lg shadow-pink-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseSpeedExtremes(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useSpeedExtremes ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
             </div>
