@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Moon, Orbit, CalendarRange, TrendingUp, Crosshair, Info, Target, Plus, Trash2, History, CheckCircle2, XCircle, Download, Loader2, Zap, Sparkles, RotateCcw, Milestone, Camera, Search, Settings, Trophy, Medal, ArrowRight } from 'lucide-react';
+import { Moon, Orbit, CalendarRange, TrendingUp, Crosshair, Info, Target, Plus, Trash2, History, CheckCircle2, XCircle, Download, Loader2, Zap, Sparkles, RotateCcw, Milestone, Camera, Search, Settings, Trophy, Medal, ArrowRight, Smartphone } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ComposedChart, Line
 } from 'recharts';
@@ -991,7 +991,43 @@ export default function App() {
   const [gridSearchResult, setGridSearchResult] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizerProgress, setOptimizerProgress] = useState({ phase: 0, percent: 0, bestSoFar: null });
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstallable, setIsInstallable] = useState(false);
 
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+    
+    const handleAppInstalled = () => {
+      setIsInstallable(false);
+      setDeferredPrompt(null);
+      console.log('PWA was installed');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      console.log('User accepted the install prompt');
+    } else {
+      console.log('User dismissed the install prompt');
+    }
+    setDeferredPrompt(null);
+    setIsInstallable(false);
+  };
   const parsedAnchors = useMemo(() => {
     return anchors.map(a => ({
       ...a,
@@ -1283,6 +1319,12 @@ export default function App() {
 
         {/* Header */}
         <header className="relative overflow-hidden bg-gradient-to-br from-midnight-900 via-midnight-900 to-amber-950/30 rounded-2xl p-6 sm:p-8 mb-5 animate-fade-in border border-amber-500/10 glow-border">
+          {isInstallable && (
+            <button onClick={handleInstallClick} className="absolute top-4 left-4 z-20 flex items-center gap-1.5 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white px-3 py-1.5 rounded-full text-xs font-display tracking-wide shadow-lg shadow-indigo-900/30 transition-all duration-300 transform hover:scale-105 border border-indigo-400/30">
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>Install App</span>
+            </button>
+          )}
           {/* Decorative elements */}
           <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-full blur-2xl animate-pulse-glow" />
           <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-cyan-500/10 to-transparent rounded-full blur-2xl animate-pulse-glow" style={{ animationDelay: '1.5s' }} />
