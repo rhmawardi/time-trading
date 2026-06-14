@@ -1,5 +1,7 @@
 export async function fetchMarketData(ticker = '^JKSE') {
-  const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=2y`;
+  // Prevent double-encoding of '=' which breaks Yahoo Finance (e.g., GC=F becomes GC%253DF and 404s)
+  const safeTicker = encodeURIComponent(ticker).replace(/%3D/g, '=');
+  const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${safeTicker}?interval=1d&range=2y`;
   
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
