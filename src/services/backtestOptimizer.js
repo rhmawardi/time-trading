@@ -44,6 +44,15 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
     { useNatal: false, useRetrograde: false, useIngress: false, useLunarNode: false, useSpeedExtremes: false },
     { useNatal: true,  useRetrograde: false, useIngress: true,  useLunarNode: true,  useSpeedExtremes: true  },
     { useNatal: true,  useRetrograde: true,  useIngress: true,  useLunarNode: false, useSpeedExtremes: false },
+    
+    // --- Pencarian Terbaik untuk toogle Speed Extremes ---
+    // Memastikan setiap kombinasi utama memiliki perbandingan langsung (A/B test) khusus untuk Speed Extremes
+    { useNatal: true,  useRetrograde: true,  useIngress: true,  useLunarNode: true,  useSpeedExtremes: false }, // Counterpart ke combo 1
+    { useNatal: true,  useRetrograde: true,  useIngress: false, useLunarNode: true,  useSpeedExtremes: true  }, // Counterpart ke combo 2
+    { useNatal: false, useRetrograde: true,  useIngress: false, useLunarNode: false, useSpeedExtremes: false }, // Counterpart ke combo 3
+    { useNatal: false, useRetrograde: false, useIngress: false, useLunarNode: false, useSpeedExtremes: true  }, // Speed Extremes ONLY
+    { useNatal: true,  useRetrograde: false, useIngress: true,  useLunarNode: true,  useSpeedExtremes: false }, // Counterpart ke combo 5
+    { useNatal: true,  useRetrograde: true,  useIngress: true,  useLunarNode: false, useSpeedExtremes: true  }, // Counterpart ke combo 6
   ];
 
   // Build coarse grid

@@ -1772,47 +1772,47 @@ export default function App() {
             <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-700/50 to-transparent" />
 
             {/* Baris 2: Toggle Indikator Astro & Fibo */}
-            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 sm:gap-5">
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Satuan Zona Fibo</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setDayMode('trading')} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'trading' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Bursa</button>
-                  <button type="button" onClick={() => setDayMode('calendar')} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'calendar' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Kalender</button>
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Satuan Zona Fibo">Satuan Zona Fibo</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setDayMode('trading')} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'trading' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Bursa</button>
+                  <button type="button" onClick={() => setDayMode('calendar')} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${dayMode === 'calendar' ? 'bg-amber-400 text-slate-900 border-amber-400 shadow-lg shadow-amber-400/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>Kalender</button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Siklus IPO (Natal)</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setUseNatal(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useNatal ? 'bg-purple-500 text-white border-purple-500 shadow-lg shadow-purple-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
-                  <button type="button" onClick={() => setUseNatal(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useNatal ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Siklus IPO (Natal)">Siklus IPO (Natal)</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setUseNatal(true)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${useNatal ? 'bg-purple-500 text-white border-purple-500 shadow-lg shadow-purple-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseNatal(false)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${!useNatal ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Fase Retrograde</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setUseRetrograde(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useRetrograde ? 'bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
-                  <button type="button" onClick={() => setUseRetrograde(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useRetrograde ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Fase Retrograde">Fase Retrograde</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setUseRetrograde(true)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${useRetrograde ? 'bg-orange-500 text-white border-orange-500 shadow-lg shadow-orange-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseRetrograde(false)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${!useRetrograde ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Planet Ingress</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setUseIngress(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useIngress ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
-                  <button type="button" onClick={() => setUseIngress(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useIngress ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Planet Ingress">Planet Ingress</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setUseIngress(true)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${useIngress ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseIngress(false)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${!useIngress ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Lunar Node</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setUseLunarNode(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useLunarNode ? 'bg-cyan-500 text-white border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
-                  <button type="button" onClick={() => setUseLunarNode(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useLunarNode ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Lunar Node">Lunar Node</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setUseLunarNode(true)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${useLunarNode ? 'bg-cyan-500 text-white border-cyan-500 shadow-lg shadow-cyan-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseLunarNode(false)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${!useLunarNode ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1.5 text-sm text-slate-400">
-                <span>Speed Extremes</span>
-                <div className="flex gap-2 mt-1">
-                  <button type="button" onClick={() => setUseSpeedExtremes(true)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${useSpeedExtremes ? 'bg-pink-500 text-white border-pink-500 shadow-lg shadow-pink-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
-                  <button type="button" onClick={() => setUseSpeedExtremes(false)} className={`px-2 py-1.5 rounded-lg text-[11px] font-mono-custom border flex-1 transition-all duration-200 ${!useSpeedExtremes ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                <span className="truncate" title="Speed Extremes">Speed Extremes</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <button type="button" onClick={() => setUseSpeedExtremes(true)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${useSpeedExtremes ? 'bg-pink-500 text-white border-pink-500 shadow-lg shadow-pink-500/20' : 'bg-midnight-800 text-slate-300 border-slate-700/50 hover:border-slate-600'}`}>ON</button>
+                  <button type="button" onClick={() => setUseSpeedExtremes(false)} className={`px-1.5 py-1 rounded-md text-[10px] font-mono-custom border flex-1 transition-all duration-200 ${!useSpeedExtremes ? 'bg-slate-700 text-slate-200 border-slate-600 shadow-inner' : 'bg-midnight-800 text-slate-400 border-slate-700/50 hover:border-slate-600'}`}>OFF</button>
                 </div>
               </div>
             </div>
