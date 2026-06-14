@@ -19,7 +19,7 @@ const script = `
   
   const allMoonEvents = [...mEvents, ...mDecEvents].sort((a, b) => a.date.getTime() - b.date.getTime());
   
-  const { all, clusters } = buildConfluence([], [], allMoonEvents, pEvents, [], retro, ingress, 3);
+  const { all, clusters } = buildConfluence([], [], allMoonEvents, pEvents, [], retro, ingress, [], [], 3);
   const ranked = rankClusters(clusters);
   
   console.log('Top Clusters in June 2026:');

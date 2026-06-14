@@ -71,10 +71,11 @@ function getPerturbation(body, days) {
 function solveKepler(M, e) {
   let E = M;
   let F, dF;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 15; i++) {
     F = E - e * Math.sin(E) - M;
     dF = 1 - e * Math.cos(E);
     E = E - F / dF;
+    if (Math.abs(F) < 1e-12) break;
   }
   return E;
 }
@@ -115,8 +116,13 @@ function sunGeoLong(days) {
   return rad2deg(Math.atan2(-earth.y, -earth.x));
 }
 function getLong(body, days) {
+  const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
+  return ((siderealLong) % 360 + 360) % 360;
+}
+
+function getTropicalLong(body, days) {
   const T = days / 36525;
-  const precession = 1.39697137 * T;
+  const precession = 1.39710 * T;
   const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
   return ((siderealLong + precession) % 360 + 360) % 360;
 }
@@ -166,18 +172,23 @@ function computeIngressEvents(minMs, maxMs) {
   const events = [];
   const startMs = minMs - DAY_MS;
   const SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
+  const recentIngress = new Map();
   
   for (let ms = startMs; ms <= maxMs; ms += DAY_MS) {
     const tPrev = (ms - DAY_MS - J2000) / DAY_MS;
     const tCurr = (ms - J2000) / DAY_MS;
     
     ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].forEach(planet => {
-      const lPrev = getLong(planet, tPrev);
-      const lCurr = getLong(planet, tCurr);
+      const lPrev = getTropicalLong(planet, tPrev);
+      const lCurr = getTropicalLong(planet, tCurr);
       const sPrev = Math.floor(((lPrev % 360) + 360) % 360 / 30) % 12;
       const sCurr = Math.floor(((lCurr % 360) + 360) % 360 / 30) % 12;
       
       if (sPrev !== sCurr) {
+        const ingressKey = `${planet}-${sCurr}`;
+        const lastIngress = recentIngress.get(ingressKey);
+        if (lastIngress && ms - lastIngress < 7 * DAY_MS) return;
+        recentIngress.set(ingressKey, ms);
         const signName = SIGNS[sCurr];
         events.push({
           ms,
@@ -499,7 +510,7 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
       
       if (d > 0) {
         const checkCross = (p, c) => {
-          if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
+          if (p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180) {
             return Math.abs(p) < Math.abs(c) ? -1 : 0;
           }
           return null;
@@ -597,7 +608,7 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         
         if (d > 0) {
           const checkCross = (p, c) => {
-            if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
+            if (p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180) {
               return Math.abs(p) < Math.abs(c) ? -1 : 0;
             }
             return null;

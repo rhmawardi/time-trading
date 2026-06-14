@@ -167,6 +167,17 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
         }
       }
     }
+
+    // Also test toggling each boolean flag for top results
+    const boolFlags = ['useNatal', 'useRetrograde', 'useIngress', 'useLunarNode', 'useSpeedExtremes'];
+    for (const flag of boolFlags) {
+      const variant = { ...p, [flag]: !p[flag] };
+      const key = paramKey(variant);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        fineGrid.push(variant);
+      }
+    }
   }
 
   const totalFine = fineGrid.length;

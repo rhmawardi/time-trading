@@ -106,13 +106,13 @@ export function detectSwings(data, lookbackWindow = 14) {
     );
     const avgPrice = windowSlice.reduce((s, d) => s + d.close, 0) / windowSlice.length;
     
-    if (highStrength >= pivotThreshold && rightWindow >= 1) {
+    if (highStrength >= pivotThreshold) {
       const windowLow = Math.min(...windowSlice.map(d => d.low));
       const range = currentHigh - windowLow;
       if (avgPrice > 0 && range / avgPrice >= significanceThreshold) {
         swings.push({ date: data[i].date, type: 'high', value: currentHigh, strength: Math.round(highStrength * 100) });
       }
-    } else if (lowStrength >= pivotThreshold && rightWindow >= 1) {
+    } else if (lowStrength >= pivotThreshold) {
       const windowHigh = Math.max(...windowSlice.map(d => d.high));
       const range = windowHigh - currentLow;
       if (avgPrice > 0 && range / avgPrice >= significanceThreshold) {

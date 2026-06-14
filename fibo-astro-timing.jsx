@@ -96,10 +96,11 @@ function getPerturbation(body, days) {
 function solveKepler(M, e) {
   let E = M;
   let F, dF;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 15; i++) {
     F = E - e * Math.sin(E) - M;
     dF = 1 - e * Math.cos(E);
     E = E - F / dF;
+    if (Math.abs(F) < 1e-12) break;
   }
   return E;
 }
@@ -140,8 +141,13 @@ function sunGeoLong(days) {
   return rad2deg(Math.atan2(-earth.y, -earth.x));
 }
 function getLong(body, days) {
+  const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
+  return ((siderealLong) % 360 + 360) % 360;
+}
+
+function getTropicalLong(body, days) {
   const T = days / 36525;
-  const precession = 1.39697137 * T;
+  const precession = 1.39710 * T;
   const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
   return ((siderealLong + precession) % 360 + 360) % 360;
 }
@@ -197,25 +203,31 @@ function computeIngressEvents(minMs, maxMs) {
   const events = [];
   const startMs = minMs - DAY_MS;
   const SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces'];
+  const recentIngress = new Map();
   
   for (let ms = startMs; ms <= maxMs; ms += DAY_MS) {
     const tPrev = (ms - DAY_MS - J2000) / DAY_MS;
     const tCurr = (ms - J2000) / DAY_MS;
     
     ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].forEach(planet => {
-      const lPrev = getLong(planet, tPrev);
-      const lCurr = getLong(planet, tCurr);
+      const lPrev = getTropicalLong(planet, tPrev);
+      const lCurr = getTropicalLong(planet, tCurr);
       const sPrev = Math.floor(((lPrev % 360) + 360) % 360 / 30) % 12;
       const sCurr = Math.floor(((lCurr % 360) + 360) % 360 / 30) % 12;
       
       if (sPrev !== sCurr) {
+        const ingressKey = `${planet}-${sCurr}`;
+        const lastIngress = recentIngress.get(ingressKey);
+        if (lastIngress && ms - lastIngress < 7 * DAY_MS) return;
+        recentIngress.set(ingressKey, ms);
+
         const signName = SIGNS[sCurr];
         // Bisect to find precise sign-boundary crossing
         const boundary = sCurr * 30;
         const preciseMs = bisectCrossing(
           (t) => {
             const days = (t - J2000) / DAY_MS;
-            const lon = getLong(planet, days);
+            const lon = getTropicalLong(planet, days);
             // Distance from boundary, wrapping correctly
             let diff = lon - boundary;
             if (diff > 180) diff -= 360;
@@ -464,8 +476,8 @@ function computeMoonDeclinationEvents(minMs, maxMs) {
   for (let d = 0; d <= maxDays; d++) {
     const dec = getMoonDeclination(startDays + d);
     if (d > 0) {
-      const msA = minMs + (d - 2) * DAY_MS; // start of interval
-      const msB = minMs + (d - 1) * DAY_MS; // end of interval
+      const msA = J2000 + (startDays + d - 1) * DAY_MS;
+      const msB = J2000 + (startDays + d) * DAY_MS;
       
       if (prevDec !== null) {
         // Zero cross — bisect to find precise equatorial crossing
@@ -559,7 +571,7 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
       const conj = norm180(la - lb), opp = norm180(la - lb - 180), sq1 = norm180(la - lb - 90), sq2 = norm180(la - lb + 90), tri1 = norm180(la - lb - 120), tri2 = norm180(la - lb + 120), sex1 = norm180(la - lb - 60), sex2 = norm180(la - lb + 60);
       
       if (d > 0) {
-        const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+        const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
         const msA = minAnchorMs + (d - 1) * DAY_MS;
         const msB = minAnchorMs + d * DAY_MS;
         
@@ -624,8 +636,8 @@ function computeLunarNodeEvents(minMs, maxMs) {
   planets.forEach(p => prevVals[p] = { conj: null, opp: null, sq1: null, sq2: null });
 
   for (let d = 0; d <= maxDays; d++) {
-    const msA = minMs + (d - 2) * DAY_MS;
-    const msB = minMs + (d - 1) * DAY_MS;
+    const msA = J2000 + (startDays + d - 1) * DAY_MS;
+    const msB = J2000 + (startDays + d) * DAY_MS;
     
     planets.forEach(planet => {
       const days = startDays + d;
@@ -639,7 +651,7 @@ function computeLunarNodeEvents(minMs, maxMs) {
       const sq2 = norm180(pLong - nodeLong + 90);
       
       if (d > 0) {
-        const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+        const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
         const prev = prevVals[planet];
         
         if (isCross(prev.conj, conj)) {
@@ -775,7 +787,7 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         const sex2 = norm180(tLong - nLong + 60);
         
         if (d > 0) {
-          const isCross = (p, c) => p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180;
+          const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
           const msA = minAnchorMs + (d - 1) * DAY_MS;
           const msB = minAnchorMs + d * DAY_MS;
           
@@ -847,8 +859,9 @@ function buildConfluence(fibZones, interFibZones, moonEvents, planetEvents, nata
     } else {
       // Distance from weighted center (not from last event)
       const distFromCenter = Math.abs(ev.ms - currentCenter) / DAY_MS;
+      const distFromFirst = Math.abs(ev.ms - current[0].ms) / DAY_MS;
       
-      if (distFromCenter <= tolerance) {
+      if (distFromCenter <= tolerance && distFromFirst <= tolerance * 2) {
         current.push(ev);
         // Update weighted center
         const w = ev.weight || 1.0;
@@ -992,14 +1005,14 @@ function computeBacktest(clusters, actualReversals, tolerance) {
   const timingErrors = [];
   
   const details = clusters.map(c => {
-    // Use only top-weight events for centroid (filter out noise)
-    const topEvents = c.filter(ev => (ev.weight || 1.0) >= 1.0); // ignore tiny-weight events
-    const effectiveEvents = topEvents.length >= 2 ? topEvents : c;
-    const totalWeight = effectiveEvents.reduce((sum, ev) => sum + (ev.weight || 1.0), 0);
-    const clusterCenter = effectiveEvents.reduce((sum, ev) => 
+    const totalWeight = c.reduce((sum, ev) => sum + (ev.weight || 1.0), 0);
+    const clusterCenter = c.reduce((sum, ev) => 
       sum + ev.ms * (ev.weight || 1.0), 0) / totalWeight;
-    const minC = clusterCenter - tolerance * DAY_MS;
-    const maxC = clusterCenter + tolerance * DAY_MS;
+    // Use expanded window covering full cluster span + tolerance
+    const clusterStart = Math.min(...c.map(ev => ev.ms));
+    const clusterEnd = Math.max(...c.map(ev => ev.ms));
+    const minC = clusterStart - tolerance * DAY_MS;
+    const maxC = clusterEnd + tolerance * DAY_MS;
     
     // Find only the NEAREST unmatched reversal within the tolerance window (prevents Recall inflation)
     const candidateRevs = revMs
@@ -1303,6 +1316,7 @@ export default function App() {
   const [useSpeedExtremes, setUseSpeedExtremes] = useLocalStorage('fibo-astro-use-speed', true);
   const [minSignalScore, setMinSignalScore] = useLocalStorage('fibo-astro-min-score', 6.0);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [anchorOptimizeProgress, setAnchorOptimizeProgress] = useState(null);
   const [activeTab, setActiveTab] = useState('settings');
   const [gridSearchResult, setGridSearchResult] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -1399,13 +1413,17 @@ export default function App() {
       if (ev.ms > maxRevMs + (confluenceTolerance * DAY_MS)) return;
 
       if (!statsMap.has(ev.label)) {
-        statsMap.set(ev.label, { label: ev.label, type: ev.type, total: 0, hits: 0 });
+        statsMap.set(ev.label, { label: ev.label, type: ev.type, total: 0, hits: 0, matchedRevs: new Set() });
       }
       const stat = statsMap.get(ev.label);
       stat.total += 1;
       
-      const isHit = revMs.some(rMs => Math.abs(rMs - ev.ms) <= confluenceTolerance * DAY_MS);
-      if (isHit) stat.hits += 1;
+      // Only count each reversal once per label to prevent hit-rate inflation
+      const matchedRev = revMs.find(rMs => Math.abs(rMs - ev.ms) <= confluenceTolerance * DAY_MS && !stat.matchedRevs.has(rMs));
+      if (matchedRev !== undefined) {
+        stat.hits += 1;
+        stat.matchedRevs.add(matchedRev);
+      }
     });
     
     const statsArr = Array.from(statsMap.values())
@@ -1484,6 +1502,13 @@ export default function App() {
       const fibCache = new Map();
       const testMinAnchorMs = Math.min(...parsedAnchors.map(a => a.ms));
 
+      // Precompute reversal boundary for data-leakage prevention
+      const gsRevMs = actualReversals.map(d => Date.parse(`${d.date}T00:00:00Z`)).filter(ms => !Number.isNaN(ms));
+      const gsMaxRevMs = gsRevMs.length > 0 ? Math.max(...gsRevMs) : 0;
+
+      // Precomputed astroCycleStats for consistent ranking
+      const precomputedStats = astroCycleStats;
+
       const result = await runGridSearchOptimizer(
         (params) => {
           const testMaxTargetMs = Math.max(...parsedAnchors.map(a => a.ms + params.projectionDays * DAY_MS));
@@ -1523,8 +1548,11 @@ export default function App() {
             params.useSpeedExtremes ? astro.speedEvents : [],
             params.confluenceTolerance
           );
-          const testRanked = rankClusters(testClusters);
-          const filteredClusters = testRanked.filter(c => c.score >= params.minSignalScore).map(c => c.events);
+          const testRanked = rankClusters(testClusters, precomputedStats);
+          // Fix data leakage: only evaluate clusters within the reversal time range
+          const filteredClusters = testRanked
+            .filter(c => c.score >= params.minSignalScore && c.ms <= gsMaxRevMs + params.confluenceTolerance * DAY_MS)
+            .map(c => c.events);
           return computeBacktest(filteredClusters, actualReversals, params.confluenceTolerance);
         },
         (progress) => {
@@ -1571,7 +1599,6 @@ export default function App() {
         let selectedSwings = [];
         
         if (strategy === 'golden') {
-          const minor = swings[swings.length - 1];
           let absHigh = swings[0];
           let absLow = swings[0];
           swings.forEach(s => {
@@ -1581,7 +1608,7 @@ export default function App() {
           const major = new Date(absHigh.date) < new Date(absLow.date) ? absHigh : absLow;
 
           let medium = null;
-          const midCandidates = swings.filter(s => new Date(s.date) > new Date(major.date) && new Date(s.date) < new Date(minor.date));
+          const midCandidates = swings.filter(s => new Date(s.date) > new Date(major.date));
           if (midCandidates.length > 0) {
             let bestMid = midCandidates[0];
             midCandidates.forEach(s => {
@@ -1592,6 +1619,22 @@ export default function App() {
               }
             });
             medium = bestMid;
+          }
+
+          let minor = null;
+          if (medium) {
+            const minorCandidates = swings.filter(s => new Date(s.date) > new Date(medium.date) && s.type !== medium.type);
+            if (minorCandidates.length > 0) {
+              let bestMinor = minorCandidates[0];
+              minorCandidates.forEach(s => {
+                if (medium.type === 'high') {
+                  if (s.type === 'low' && s.value < bestMinor.value) bestMinor = s;
+                } else {
+                  if (s.type === 'high' && s.value > bestMinor.value) bestMinor = s;
+                }
+              });
+              minor = bestMinor;
+            }
           }
 
           const strategySwings = [major, medium, minor].filter(Boolean);
@@ -1619,6 +1662,189 @@ export default function App() {
       alert("Gagal menarik data. Pastikan kode ticker valid di Yahoo Finance: " + error.message);
     } finally {
       setIsLoadingData(false);
+    }
+  };
+
+  const handleOptimizeAnchors = async () => {
+    if (!ticker.trim()) return alert('Silakan masukkan kode aset (ticker) terlebih dahulu!');
+    setIsLoadingData(true);
+    setAnchorOptimizeProgress({ percent: 0, text: 'Memuat data...' });
+    
+    try {
+      const data = await fetchMarketData(ticker.trim().toUpperCase());
+      setMarketData(data);
+      const swings = detectSwings(data, swingLookback);
+      
+      const revList = swings.map((s, i) => ({ id: Date.now() + i, date: s.date }));
+      setActualReversals(revList);
+      
+      if (swings.length < 3) {
+        alert("Swing tidak cukup untuk dioptimasi.");
+        return;
+      }
+
+      // Seleksi swing cerdas: Gabungkan macro swing (Absolute High/Low) dengan swing terbaru
+      const candidateSwingsMap = new Map();
+
+      // 1. Cari Absolute High & Low
+      if (swings.length > 0) {
+        let absHigh = swings[0];
+        let absLow = swings[0];
+        swings.forEach(s => {
+          if (s.type === 'high' && s.value > absHigh.value) absHigh = s;
+          if (s.type === 'low' && s.value < absLow.value) absLow = s;
+        });
+        candidateSwingsMap.set(absHigh.date, absHigh);
+        candidateSwingsMap.set(absLow.date, absLow);
+      }
+
+      // 2. Ambil 25 swing terbaru
+      const recentSwings = swings.slice(-25);
+      recentSwings.forEach(s => {
+        candidateSwingsMap.set(s.date, s);
+      });
+
+      // 3. Konversi ke array dan urutkan secara kronologis
+      const finalCandidateSwings = Array.from(candidateSwingsMap.values()).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      const minAnchorMs = new Date(finalCandidateSwings[0].date).getTime();
+      const maxAnchorMs = new Date(finalCandidateSwings[finalCandidateSwings.length - 1].date).getTime();
+      // Ensure astro range covers all reversals (Bug #8)
+      const lastRevMs = Math.max(...revList.map(r => Date.parse(`${r.date}T00:00:00Z`)));
+      const maxTargetMs = Math.max(maxAnchorMs + projectionDays * DAY_MS, lastRevMs + confluenceTolerance * DAY_MS);
+
+      // Precompute reversal boundary for data-leakage prevention (Bug #1)
+      const ancOptRevMs = revList.map(d => Date.parse(`${d.date}T00:00:00Z`)).filter(ms => !Number.isNaN(ms));
+      const ancOptMaxRevMs = ancOptRevMs.length > 0 ? Math.max(...ancOptRevMs) : 0;
+      
+      setAnchorOptimizeProgress({ percent: 5, text: 'Menghitung siklus astro...' });
+      const yieldToUI = () => new Promise(r => setTimeout(r, 0));
+      await yieldToUI();
+      
+      const astro = {
+        moonEvents: [...computeMoonEvents(minAnchorMs, maxTargetMs), ...computeMoonDeclinationEvents(minAnchorMs, maxTargetMs)].sort((a, b) => a.date.getTime() - b.date.getTime()),
+        planetEvents: computePlanetEvents(minAnchorMs, maxTargetMs),
+        natalEvents: useNatal ? computeNatalEvents(ticker, minAnchorMs, maxTargetMs) : [],
+        retroEvents: useRetrograde ? computeRetrogradeEvents(minAnchorMs, maxTargetMs) : [],
+        ingressEvents: useIngress ? computeIngressEvents(minAnchorMs, maxTargetMs) : [],
+        lunarNodeEvents: useLunarNode ? computeLunarNodeEvents(minAnchorMs, maxTargetMs) : [],
+        speedEvents: useSpeedExtremes ? computeSpeedExtremeEvents(minAnchorMs, maxTargetMs) : [],
+      };
+
+      const combinations = [];
+      const n = finalCandidateSwings.length;
+      
+      // Combos of 1 (single anchor — effective for assets with 1 dominant swing)
+      for (let i = 0; i < n; i++) {
+        combinations.push([finalCandidateSwings[i]]);
+      }
+
+      // Combos of 2
+      for (let i = 0; i < n - 1; i++) {
+        for (let j = i + 1; j < n; j++) {
+          combinations.push([finalCandidateSwings[i], finalCandidateSwings[j]]);
+        }
+      }
+      
+      // Combos of 3 (Hanya yang berselang-seling H-L-H atau L-H-L untuk mengurangi noise & validitas Elliot/ABC)
+      for (let i = 0; i < n - 2; i++) {
+        for (let j = i + 1; j < n - 1; j++) {
+          for (let k = j + 1; k < n; k++) {
+            const s1 = finalCandidateSwings[i];
+            const s2 = finalCandidateSwings[j];
+            const s3 = finalCandidateSwings[k];
+            
+            // Validasi: High-Low-High atau Low-High-Low
+            if (s1.type !== s2.type && s2.type !== s3.type) {
+              combinations.push([s1, s2, s3]);
+            }
+          }
+        }
+      }
+
+      // Combos of 4 (alternating H-L-H-L or L-H-L-H, limited to recent swings)
+      const recentN = Math.min(n, 12);
+      const recentStart = n - recentN;
+      for (let i = recentStart; i < n - 3; i++) {
+        for (let j = i + 1; j < n - 2; j++) {
+          for (let k = j + 1; k < n - 1; k++) {
+            for (let l = k + 1; l < n; l++) {
+              const s = [finalCandidateSwings[i], finalCandidateSwings[j], finalCandidateSwings[k], finalCandidateSwings[l]];
+              if (s[0].type !== s[1].type && s[1].type !== s[2].type && s[2].type !== s[3].type) {
+                combinations.push(s);
+              }
+            }
+          }
+        }
+      }
+
+      const totalCombos = combinations.length;
+      let bestCombo = null;
+      let bestResult = null;
+
+      for (let i = 0; i < totalCombos; i++) {
+        const combo = combinations[i];
+        
+        const testAnchors = combo.map((s, idx) => ({
+          id: `opt-${idx}`,
+          date: s.date,
+          high: s.type === 'high' ? String(s.value.toFixed(2)) : '',
+          low: s.type === 'low' ? String(s.value.toFixed(2)) : '',
+          ms: new Date(s.date).getTime()
+        }));
+
+        const testFibZones = computeFibZones(testAnchors, projectionDays, dayMode, ticker);
+        const testInterFib = computeInterAnchorFib(testAnchors, minAnchorMs, maxTargetMs);
+
+        const { clusters: testClusters } = buildConfluence(
+          testFibZones, testInterFib, astro.moonEvents, astro.planetEvents,
+          astro.natalEvents, astro.retroEvents, astro.ingressEvents,
+          astro.lunarNodeEvents, astro.speedEvents, confluenceTolerance
+        );
+
+        const testRanked = rankClusters(testClusters, astroCycleStats);
+        // Fix data leakage: only evaluate clusters within the reversal time range
+        const filteredClusters = testRanked
+          .filter(c => c.score >= minSignalScore && c.ms <= ancOptMaxRevMs + confluenceTolerance * DAY_MS)
+          .map(c => c.events);
+        
+        const result = computeBacktest(filteredClusters, revList, confluenceTolerance);
+
+        // Use epsilon comparison for floating-point safety
+        const f1Equal = bestResult && Math.abs(result.f1 - bestResult.f1) < 0.01;
+        const precEqual = bestResult && Math.abs(result.precision - bestResult.precision) < 0.01;
+        if (!bestResult || 
+            result.f1 > bestResult.f1 + 0.01 || 
+            (f1Equal && result.precision > bestResult.precision + 0.01) ||
+            (f1Equal && precEqual && combo.length < bestCombo.length)) {
+          bestResult = result;
+          bestCombo = combo;
+        }
+
+        if ((i + 1) % 25 === 0 || i === totalCombos - 1) {
+          setAnchorOptimizeProgress({
+            percent: Math.round(((i + 1) / totalCombos) * 100),
+            text: `Menguji kombinasi ${i + 1}/${totalCombos}...`
+          });
+          await yieldToUI();
+        }
+      }
+
+      if (bestCombo) {
+        setAnchors(bestCombo.map((s, i) => ({
+          id: Date.now() + i,
+          date: s.date,
+          high: s.type === 'high' ? String(s.value.toFixed(2)) : '',
+          low: s.type === 'low' ? String(s.value.toFixed(2)) : '',
+        })));
+        alert(`Optimasi Anchor Selesai! Ditemukan ${bestCombo.length} titik swing terbaik dengan F1-Score: ${bestResult.f1.toFixed(1)}%.`);
+      }
+
+    } catch (err) {
+      alert("Gagal melakukan optimasi anchor: " + err.message);
+    } finally {
+      setIsLoadingData(false);
+      setAnchorOptimizeProgress(null);
     }
   };
 
@@ -1727,23 +1953,32 @@ export default function App() {
                   <option value="GC=F">Gold Futures (GC=F)</option>
                 </optgroup>
               </select>
-              <div className="flex gap-2 w-full sm:w-auto">
+              <div className="flex gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
                 <button 
                   onClick={() => handleAutoDetect('normal')} 
-                  disabled={isLoadingData}
+                  disabled={isLoadingData || anchorOptimizeProgress}
                   className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-indigo-800 disabled:to-indigo-800 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-indigo-600/20 hover:shadow-indigo-500/40 disabled:shadow-none"
                 >
-                  {isLoadingData ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  {isLoadingData ? 'Menarik...' : 'Auto-Detect (15 Titik)'}
+                  {isLoadingData && !anchorOptimizeProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  {isLoadingData && !anchorOptimizeProgress ? 'Menarik...' : 'Auto-Detect (15 Titik)'}
                 </button>
                 <button 
                   onClick={() => handleAutoDetect('golden')} 
-                  disabled={isLoadingData}
+                  disabled={isLoadingData || anchorOptimizeProgress}
                   className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-amber-800 disabled:to-amber-800 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-amber-600/20 hover:shadow-amber-500/40 disabled:shadow-none"
                   title="Gunakan pengaturan terbaik (3-Anchor) untuk akurasi optimal"
                 >
                   <Zap className="w-3.5 h-3.5" />
                   Setelan Emas (3 Titik)
+                </button>
+                <button 
+                  onClick={() => handleOptimizeAnchors()} 
+                  disabled={isLoadingData || anchorOptimizeProgress}
+                  className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:from-purple-900 disabled:to-indigo-900 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-purple-600/20 hover:shadow-purple-500/40 disabled:shadow-none"
+                  title="Mencari kombinasi 2-3 anchor terbaik yang menghasilkan skor tertinggi secara otomatis"
+                >
+                  {anchorOptimizeProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {anchorOptimizeProgress ? anchorOptimizeProgress.text : 'Auto-Optimasi Titik'}
                 </button>
               </div>
             </div>
@@ -2100,6 +2335,10 @@ export default function App() {
                   </p>
                   <div className="space-y-3">
                     {topPicks.map((c, i) => {
+                      const backtestDetail = backtestResult?.details?.find(d => d.cluster === c.events);
+                      const isHit = backtestDetail?.isHit;
+                      const hitDates = backtestDetail?.hitDates || [];
+                      
                       const has100PercentHitRate = c.events.some(e => {
                         const stat = astroCycleStats.find(s => s.label === e.label);
                         return stat && stat.hitRate >= 99.9;
@@ -2143,6 +2382,7 @@ export default function App() {
                             {c.uniqueAnchors >= 2 && <span className="text-[10px] bg-cyan-500/15 border border-cyan-500/25 px-2 py-0.5 rounded-full text-cyan-300 font-mono-custom font-bold">⚓ {c.uniqueAnchors} Anchor</span>}
                             {c.events.some(e => e.type === 'interfibo') && <span className="text-[10px] bg-fuchsia-500/15 border border-fuchsia-500/25 px-2 py-0.5 rounded-full text-fuchsia-300 font-mono-custom font-bold">📐 Inter-Fib</span>}
                             {c.events.some(e => e.label.includes('Gerhana')) && <span className="text-[10px] bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-full text-rose-200 font-mono-custom font-bold drop-shadow-md animate-pulse">🌑 GERHANA</span>}
+                            {isHit && <span className="flex items-center gap-1 text-[10px] bg-emerald-500/20 border border-emerald-500/50 px-2 py-0.5 rounded-full text-emerald-300 font-mono-custom font-bold drop-shadow-md"><CheckCircle2 className="w-3 h-3 text-emerald-400" /> HIT: {hitDates.map(fmtDate).join(', ')}</span>}
                             <div className="flex flex-wrap gap-1.5 mt-1 sm:mt-0">
                                 {c.ingressCount > 0 && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">{c.ingressCount} Ingress</span>}
                                 {c.retroCount > 0 && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30 uppercase tracking-wider">{c.retroCount} Retro</span>}
@@ -2430,6 +2670,10 @@ export default function App() {
               ) : (
                 <div className="space-y-2">
                   {clusters.map((c, i) => {
+                    const backtestDetail = backtestResult?.details?.find(d => d.cluster === c);
+                    const isHit = backtestDetail?.isHit;
+                    const hitDates = backtestDetail?.hitDates || [];
+                    
                     const has100PercentHitRate = c.some(e => {
                       const stat = astroCycleStats.find(s => s.label === e.label);
                       return stat && stat.hitRate >= 99.9;
@@ -2457,6 +2701,7 @@ export default function App() {
                           {fmtDate(c[0].date)}
                           {c[c.length - 1].ms !== c[0].ms ? ` – ${fmtDate(c[c.length - 1].date)}` : ''}
                         </span>
+                        {isHit && <span className="flex items-center gap-1 text-[10px] bg-emerald-500/20 border border-emerald-500/50 px-1.5 py-0.5 rounded-full text-emerald-300 font-mono-custom font-bold drop-shadow-md"><CheckCircle2 className="w-3 h-3 text-emerald-400" /> HIT: {hitDates.map(fmtDate).join(', ')}</span>}
                         {(() => {
                           const rc = ranked.find(r => r.events === c);
                           return rc ? <span className={`text-[10px] border px-1.5 py-0.5 rounded-full font-mono-custom font-medium ${has100PercentHitRate ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : hasFrequentProbHitRate ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-300' : hasHighProbHitRate ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>Skor: {rc.score.toFixed(1)}</span> : null;
