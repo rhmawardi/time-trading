@@ -987,7 +987,7 @@ export default function App() {
   const [useIngress, setUseIngress] = useLocalStorage('fibo-astro-use-ingress', false);
   const [minSignalScore, setMinSignalScore] = useLocalStorage('fibo-astro-min-score', 6.0);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('settings');
   const [gridSearchResult, setGridSearchResult] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizerProgress, setOptimizerProgress] = useState({ phase: 0, percent: 0, bestSoFar: null });
@@ -1301,13 +1301,27 @@ export default function App() {
               <span className="text-gradient-cyan text-2xl">Fibo–Astro</span>
             </h1>
             <p className="text-sm text-slate-400 text-center max-w-lg mx-auto leading-relaxed">
-              Memproyeksikan tanggal-tanggal potensi titik balik IHSG dengan menggabungkan zona waktu Fibonacci
-              (hari bursa Senin–Jumat), siklus bulan, dan siklus planet — pendekatan time-cycle ala Astronacci.
+              Memproyeksikan tanggal-tanggal potensi titik balik Financial Market dengan menggabungkan zona waktu Fibonacci, siklus bulan, dan siklus planet — Pendekatan Time-Cycle
             </p>
           </div>
         </header>
 
-        {/* Global Settings */}
+        
+        {/* Navigation Tabs */}
+        <div className="flex flex-col gap-2 mb-6 relative z-10">
+          <div className="flex justify-center bg-midnight-950/50 p-1.5 rounded-xl border border-slate-700/30">
+            <button onClick={() => setActiveTab('settings')} className={`flex-1 sm:flex-none sm:w-1/2 py-2 sm:py-2.5 px-4 text-xs sm:text-sm font-display tracking-wide rounded-lg leading-tight transition-all duration-300 ${activeTab === 'settings' ? 'bg-gradient-to-r from-rose-600/20 to-rose-500/10 text-rose-400 shadow-sm border border-rose-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>⚙️ Settings</button>
+          </div>
+          <div className="flex flex-wrap justify-center bg-midnight-950/50 p-1.5 rounded-xl border border-slate-700/30 gap-1.5 sm:gap-2">
+            <button onClick={() => setActiveTab('overview')} className={`flex-1 min-w-[130px] py-2 sm:py-2.5 px-2 text-xs sm:text-sm font-display tracking-wide rounded-lg leading-tight transition-all duration-300 ${activeTab === 'overview' ? 'bg-gradient-to-r from-amber-600/20 to-amber-500/10 text-amber-400 shadow-sm border border-amber-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Ringkasan & Grafik</button>
+            <button onClick={() => setActiveTab('top_cycles')} className={`flex-1 min-w-[130px] py-2 sm:py-2.5 px-2 text-xs sm:text-sm font-display tracking-wide rounded-lg leading-tight transition-all duration-300 ${activeTab === 'top_cycles' ? 'bg-gradient-to-r from-emerald-600/20 to-emerald-500/10 text-emerald-400 shadow-sm border border-emerald-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Top Astro Cycles</button>
+            <button onClick={() => setActiveTab('backtest')} className={`flex-1 min-w-[130px] py-2 sm:py-2.5 px-2 text-xs sm:text-sm font-display tracking-wide rounded-lg leading-tight transition-all duration-300 ${activeTab === 'backtest' ? 'bg-gradient-to-r from-indigo-600/20 to-indigo-500/10 text-indigo-400 shadow-sm border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Laporan Backtest</button>
+            <button onClick={() => setActiveTab('zones')} className={`flex-1 min-w-[130px] py-2 sm:py-2.5 px-2 text-xs sm:text-sm font-display tracking-wide rounded-lg leading-tight transition-all duration-300 ${activeTab === 'zones' ? 'bg-gradient-to-r from-cyan-600/20 to-cyan-500/10 text-cyan-400 shadow-sm border border-cyan-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Detail Siklus Waktu</button>
+          </div>
+        </div>
+
+        {activeTab === 'settings' && (<div className="animate-fade-in">
+          {/* Global Settings */}
         <div className="glass rounded-2xl p-5 sm:p-6 mb-5 animate-fade-in-up stagger-1">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
             <h2 className="font-display text-lg text-slate-100 tracking-wide">Pengaturan Analisis</h2>
@@ -1663,13 +1677,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex bg-midnight-950/50 p-1.5 rounded-xl mb-6 border border-slate-700/30 overflow-x-auto hide-scrollbar relative z-10">
-          <button onClick={() => setActiveTab('overview')} className={`flex-1 py-2.5 px-4 text-sm font-display tracking-wide rounded-lg whitespace-nowrap transition-all duration-300 ${activeTab === 'overview' ? 'bg-gradient-to-r from-amber-600/20 to-amber-500/10 text-amber-400 shadow-sm border border-amber-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Ringkasan & Grafik</button>
-          <button onClick={() => setActiveTab('backtest')} className={`flex-1 py-2.5 px-4 text-sm font-display tracking-wide rounded-lg whitespace-nowrap transition-all duration-300 ${activeTab === 'backtest' ? 'bg-gradient-to-r from-indigo-600/20 to-indigo-500/10 text-indigo-400 shadow-sm border border-indigo-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Laporan Backtesting</button>
-          <button onClick={() => setActiveTab('zones')} className={`flex-1 py-2.5 px-4 text-sm font-display tracking-wide rounded-lg whitespace-nowrap transition-all duration-300 ${activeTab === 'zones' ? 'bg-gradient-to-r from-cyan-600/20 to-cyan-500/10 text-cyan-400 shadow-sm border border-cyan-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-midnight-800/50'}`}>Detail Siklus Waktu</button>
-        </div>
-
+        </div>)}
         {/* ================= TAB 1: OVERVIEW ================= */}
         {activeTab === 'overview' && (
           <div className="animate-fade-in">
@@ -2015,61 +2023,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
-            {/* ======== ASTRO CYCLE ANALYZER ======== */}
-            {astroCycleStats.length > 0 && (
-              <div className="glass rounded-2xl p-5 sm:p-6 mb-5 animate-fade-in-up stagger-3 border border-indigo-500/20 glow-border-indigo">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-indigo-400/10">
-                      <Trophy className="w-5 h-5 text-indigo-400" />
-                    </div>
-                    <div>
-                      <h2 className="font-display text-lg text-slate-100 tracking-wide">🏆 Top Astro Cycles Analyzer</h2>
-                      <p className="text-xs text-slate-500 mt-0.5">Siklus astrologi paling akurat dalam menangkap reversal (Minimal 2 kejadian)</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-700/50 text-xs text-slate-400 font-display">
-                        <th className="pb-2 font-medium">Siklus (Label)</th>
-                        <th className="pb-2 font-medium text-center">Tipe</th>
-                        <th className="pb-2 font-medium text-center">Muncul</th>
-                        <th className="pb-2 font-medium text-center">Hit (Kena)</th>
-                        <th className="pb-2 font-medium text-right">Hit Rate %</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {astroCycleStats.map((stat, idx) => (
-                        <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                          <td className="py-3 pr-2 text-slate-200">
-                            {idx < 3 && <span className="inline-block w-4 mr-1">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>}
-                            {stat.label}
-                          </td>
-                          <td className="py-3 px-2 text-center text-xs text-slate-500 uppercase tracking-wider">{stat.type}</td>
-                          <td className="py-3 px-2 text-center text-slate-400">{stat.total}</td>
-                          <td className="py-3 px-2 text-center font-mono-custom text-emerald-400">{stat.hits}</td>
-                          <td className="py-3 pl-2 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <span className={`font-mono-custom font-bold ${stat.hitRate >= 70 ? 'text-emerald-400' : stat.hitRate >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
-                                {stat.hitRate.toFixed(1)}%
-                              </span>
-                              <div className="w-16 h-1.5 bg-midnight-900 rounded-full overflow-hidden hidden sm:block">
-                                <div className={`h-full transition-all duration-1000 ${stat.hitRate >= 70 ? 'bg-emerald-500' : stat.hitRate >= 50 ? 'bg-amber-500' : 'bg-slate-600'}`} style={{ width: `${stat.hitRate}%` }}></div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="text-xs text-slate-500 mt-3 text-center italic">Menampilkan seluruh {astroCycleStats.length} siklus yang dievaluasi.</p>
-                </div>
-              </div>
-            )}
-
           </div>
         )}
 
@@ -2262,6 +2215,74 @@ export default function App() {
           </div>
         )}
 
+        
+        {/* ================= TAB 4: TOP CYCLES ================= */}
+        {activeTab === 'top_cycles' && (
+          <div className="animate-fade-in">
+            {/* ======== ASTRO CYCLE ANALYZER ======== */}
+            {astroCycleStats.length > 0 ? (
+              <div className="glass rounded-2xl p-5 sm:p-6 mb-5 animate-fade-in-up stagger-3 border border-indigo-500/20 glow-border-indigo">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-indigo-400/10">
+                      <Trophy className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <h2 className="font-display text-lg text-slate-100 tracking-wide">🏆 Top Astro Cycles Analyzer</h2>
+                      <p className="text-xs text-slate-500 mt-0.5">Siklus astrologi paling akurat dalam menangkap reversal (Minimal 2 kejadian)</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-700/50 text-xs text-slate-400 font-display">
+                        <th className="pb-2 font-medium">Siklus (Label)</th>
+                        <th className="pb-2 font-medium text-center">Tipe</th>
+                        <th className="pb-2 font-medium text-center">Muncul</th>
+                        <th className="pb-2 font-medium text-center">Hit (Kena)</th>
+                        <th className="pb-2 font-medium text-right">Hit Rate %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {astroCycleStats.map((stat, idx) => (
+                        <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+                          <td className="py-3 pr-2 text-slate-200">
+                            {idx < 3 && <span className="inline-block w-4 mr-1">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>}
+                            {stat.label}
+                          </td>
+                          <td className="py-3 px-2 text-center text-xs text-slate-500 uppercase tracking-wider">{stat.type}</td>
+                          <td className="py-3 px-2 text-center text-slate-400">{stat.total}</td>
+                          <td className="py-3 px-2 text-center font-mono-custom text-emerald-400">{stat.hits}</td>
+                          <td className="py-3 pl-2 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <span className={`font-mono-custom font-bold ${stat.hitRate >= 70 ? 'text-emerald-400' : stat.hitRate >= 50 ? 'text-amber-400' : 'text-slate-400'}`}>
+                                {stat.hitRate.toFixed(1)}%
+                              </span>
+                              <div className="w-16 h-1.5 bg-midnight-900 rounded-full overflow-hidden hidden sm:block">
+                                <div className={`h-full transition-all duration-1000 ${stat.hitRate >= 70 ? 'bg-emerald-500' : stat.hitRate >= 50 ? 'bg-amber-500' : 'bg-slate-600'}`} style={{ width: `${stat.hitRate}%` }}></div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-slate-500 mt-3 text-center italic">Menampilkan seluruh {astroCycleStats.length} siklus yang dievaluasi.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="glass rounded-2xl p-10 text-center flex flex-col items-center justify-center animate-fade-in border border-indigo-500/20">
+                <Trophy className="w-12 h-12 text-slate-600 mb-4 opacity-50" />
+                <h3 className="text-lg font-display text-slate-300 mb-2">Belum Ada Data Siklus</h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+                  Sistem belum dapat memproses <strong>Top Astro Cycles</strong>. Silakan kembali ke menu <strong className="text-amber-400">Settings</strong> dan pastikan Anda sudah menarik data market (Auto-Detect) agar sistem bisa membandingkan siklus masa lalu.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* Disclaimer */}
         <div className="flex gap-3 glass rounded-2xl p-4 text-xs text-slate-500 leading-relaxed animate-fade-in" style={{ animationDelay: '1.4s' }}>
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-slate-400" />
