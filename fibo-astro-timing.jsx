@@ -126,7 +126,10 @@ function sunGeoLong(days) {
   return rad2deg(Math.atan2(-earth.y, -earth.x));
 }
 function getLong(body, days) {
-  return body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
+  const T = days / 36525;
+  const precession = 1.39697137 * T;
+  const siderealLong = body === 'Sun' ? sunGeoLong(days) : geoLong(body, days);
+  return (siderealLong + precession) % 360;
 }
 
 function getDailyMotion(planet, ms) {
@@ -145,18 +148,20 @@ function computeRetrogradeEvents(minMs, maxMs) {
       const m2 = getDailyMotion(planet, ms);
       
       if (m1 >= 0 && m2 < 0) {
+        const shift = Math.abs(m1) < Math.abs(m2) ? -DAY_MS : 0;
         events.push({
-          ms,
-          date: new Date(ms).toISOString().slice(0, 10),
+          ms: ms + shift,
+          date: new Date(ms + shift).toISOString().slice(0, 10),
           type: 'retro',
           label: `${planet} Station Retrograde`,
           planet,
           weight: 2.5
         });
       } else if (m1 < 0 && m2 >= 0) {
+        const shift = Math.abs(m1) < Math.abs(m2) ? -DAY_MS : 0;
         events.push({
-          ms,
-          date: new Date(ms).toISOString().slice(0, 10),
+          ms: ms + shift,
+          date: new Date(ms + shift).toISOString().slice(0, 10),
           type: 'retro',
           label: `${planet} Station Direct`,
           planet,
@@ -224,32 +229,51 @@ const IPO_DATES = {
 const BEI_HOLIDAYS = [
   '2024-01-01', '2024-02-08', '2024-02-09', '2024-03-11', '2024-03-12', '2024-03-29', '2024-04-08', '2024-04-09', '2024-04-10', '2024-04-11', '2024-04-12', '2024-04-15', '2024-05-01', '2024-05-09', '2024-05-10', '2024-05-23', '2024-05-24', '2024-06-17', '2024-06-18', '2024-12-25', '2024-12-26',
   '2025-01-01', '2025-01-27', '2025-01-29', '2025-03-28', '2025-03-31', '2025-04-01', '2025-04-02', '2025-04-03', '2025-04-04', '2025-04-18', '2025-05-01', '2025-05-12', '2025-05-29', '2025-06-06', '2025-06-27', '2025-08-17', '2025-09-05', '2025-12-25', '2025-12-26',
-  '2026-01-01', '2026-02-17', '2026-03-19', '2026-03-20', '2026-04-03', '2026-05-01', '2026-05-14', '2026-06-01', '2026-06-15', '2026-06-16', '2026-08-17', '2026-09-16', '2026-12-25', '2026-12-28'
+  '2026-01-01', '2026-02-17', '2026-03-19', '2026-03-20', '2026-04-03', '2026-05-01', '2026-05-14', '2026-06-01', '2026-06-16', '2026-08-17', '2026-09-16', '2026-12-25', '2026-12-28'
 ];
 
-function addTradingDays(anchorMs, n) {
+const US_HOLIDAYS = [
+  '2024-01-01', '2024-01-15', '2024-02-19', '2024-03-29', '2024-05-27', '2024-06-19', '2024-07-04', '2024-09-02', '2024-11-28', '2024-12-25',
+  '2025-01-01', '2025-01-20', '2025-02-17', '2025-04-18', '2025-05-26', '2025-06-19', '2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25',
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25', '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25'
+];
+
+function addTradingDays(anchorMs, n, ticker = '^JKSE') {
   if (n <= 0) return new Date(anchorMs);
+  
+  if (ticker && ticker.includes('-USD')) {
+    return new Date(anchorMs + n * DAY_MS);
+  }
+  
   let ms = anchorMs;
   let added = 0;
+  
+  const isBEI = ticker && (ticker.endsWith('.JK') || ticker === '^JKSE');
+  const isUS = ticker && (ticker === '^GSPC' || ticker === 'GC=F');
+  
   while (added < n) {
     ms += DAY_MS;
     const dateObj = new Date(ms);
     const dow = dateObj.getUTCDay();
     const dateStr = dateObj.toISOString().slice(0, 10);
-    if (dow !== 0 && dow !== 6 && !BEI_HOLIDAYS.includes(dateStr)) {
-      added += 1;
-    }
+    
+    if (dow === 0 || dow === 6) continue;
+    
+    if (isBEI && BEI_HOLIDAYS.includes(dateStr)) continue;
+    if (isUS && US_HOLIDAYS.includes(dateStr)) continue;
+    
+    added += 1;
   }
   return new Date(ms);
 }
 
-function computeFibZones(anchors, projectionDays, dayMode) {
+function computeFibZones(anchors, projectionDays, dayMode, ticker = '^JKSE') {
   const zones = [];
   anchors.forEach((a, idx) => {
     if (Number.isNaN(a.ms)) return;
     
     FIB_DAYS.forEach((f) => {
-      const date = dayMode === 'trading' ? addTradingDays(a.ms, f) : new Date(a.ms + f * DAY_MS);
+      const date = dayMode === 'trading' ? addTradingDays(a.ms, f, ticker) : new Date(a.ms + f * DAY_MS);
       const calDay = Math.round((date.getTime() - a.ms) / DAY_MS);
       if (calDay <= projectionDays) {
         const unit = dayMode === 'trading' ? 'hari bursa' : 'hari kalender';
@@ -389,7 +413,7 @@ function getMoonDeclination(days) {
   const epsilon = 23.439291 - 0.0130042 * T;
 
   const sinDec = sind(beta) * cosd(epsilon) + cosd(beta) * sind(epsilon) * sind(lambda);
-  return rad2deg(Math.asin(sinDec));
+  return (Math.asin(sinDec) * 180) / Math.PI;
 }
 
 function computeMoonDeclinationEvents(minMs, maxMs) {
@@ -409,18 +433,23 @@ function computeMoonDeclinationEvents(minMs, maxMs) {
       if (prevDec !== null) {
         // Zero cross
         if ((prevDec >= 0 && dec < 0) || (prevDec < 0 && dec >= 0)) {
-          events.push({ date, label: 'Deklinasi: Melintasi Ekuator (0°)', weight: 1.5 });
+          const shift = Math.abs(dec) < Math.abs(prevDec) ? 1 : 0;
+          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Melintasi Ekuator (0°)', weight: 1.5 });
         }
         
         // OOB cross
         if (prevDec < 23.44 && dec >= 23.44) {
-          events.push({ date, label: 'Deklinasi: OOB Utara (> 23.44°)', weight: 2.0 });
+          const shift = Math.abs(dec - 23.44) < Math.abs(prevDec - 23.44) ? 1 : 0;
+          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: OOB Utara (> 23.44°)', weight: 2.0 });
         } else if (prevDec >= 23.44 && dec < 23.44) {
-          events.push({ date, label: 'Deklinasi: Re-enter dari Utara', weight: 2.5 });
+          const shift = Math.abs(dec - 23.44) < Math.abs(prevDec - 23.44) ? 1 : 0;
+          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Re-enter dari Utara', weight: 2.5 });
         } else if (prevDec > -23.44 && dec <= -23.44) {
-          events.push({ date, label: 'Deklinasi: OOB Selatan (< -23.44°)', weight: 2.0 });
+          const shift = Math.abs(dec + 23.44) < Math.abs(prevDec + 23.44) ? 1 : 0;
+          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: OOB Selatan (< -23.44°)', weight: 2.0 });
         } else if (prevDec <= -23.44 && dec > -23.44) {
-          events.push({ date, label: 'Deklinasi: Re-enter dari Selatan', weight: 2.5 });
+          const shift = Math.abs(dec + 23.44) < Math.abs(prevDec + 23.44) ? 1 : 0;
+          events.push({ date: new Date(ms + shift * DAY_MS), label: 'Deklinasi: Re-enter dari Selatan', weight: 2.5 });
         }
         
         // Maxima / Minima
@@ -442,8 +471,9 @@ function computeMoonDeclinationEvents(minMs, maxMs) {
 
 // Pasangan planet yang signifikan secara astrologi keuangan untuk aspek minor (Trine/Sextile)
 const MAJOR_FINANCIAL_PAIRS = new Set([
-  'Sun-Jupiter', 'Sun-Saturn', 'Sun-Mars',
-  'Jupiter-Saturn', 'Mars-Jupiter', 'Mars-Saturn',
+  'Sun-Jupiter', 'Sun-Saturn', 'Sun-Mars', 'Sun-Uranus',
+  'Venus-Uranus', 'Venus-Jupiter', 'Venus-Saturn',
+  'Jupiter-Saturn', 'Mars-Jupiter', 'Mars-Saturn', 'Jupiter-Uranus'
 ]);
 
 function computePlanetEvents(minAnchorMs, maxTargetMs) {
@@ -479,26 +509,42 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
       const conj = norm180(la - lb), opp = norm180(la - lb - 180), sq1 = norm180(la - lb - 90), sq2 = norm180(la - lb + 90), tri1 = norm180(la - lb - 120), tri2 = norm180(la - lb + 120), sex1 = norm180(la - lb - 60), sex2 = norm180(la - lb + 60);
       
       if (d > 0) {
-        const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
+        const checkCross = (p, c) => {
+          if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
+            return Math.abs(p) < Math.abs(c) ? -1 : 0;
+          }
+          return null;
+        };
         
         // Conjunction & Opposition: all pairs (high significance)
-        if (isCross(prevConj, conj)) {
-          events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Konjungsi (0°): ${pair.label}`, weight: 3.0 });
-        }
-        if (isCross(prevOpp, opp)) {
-          events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Oposisi (180°): ${pair.label}`, weight: 2.5 });
-        }
+        const cConj = checkCross(prevConj, conj);
+        if (cConj !== null) events.push({ date: new Date(minAnchorMs + (d + cConj) * DAY_MS), label: `Konjungsi (0°): ${pair.label}`, weight: 3.0 });
+        
+        const cOpp = checkCross(prevOpp, opp);
+        if (cOpp !== null) events.push({ date: new Date(minAnchorMs + (d + cOpp) * DAY_MS), label: `Oposisi (180°): ${pair.label}`, weight: 2.5 });
+        
         // Square: all pairs (medium significance)
-        if (isCross(prevSq1, sq1) || isCross(prevSq2, sq2)) {
-          events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Square (90°): ${pair.label}`, weight: 1.5 });
+        const cSq1 = checkCross(prevSq1, sq1);
+        const cSq2 = checkCross(prevSq2, sq2);
+        if (cSq1 !== null || cSq2 !== null) {
+          const shift = cSq1 !== null ? cSq1 : cSq2;
+          events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Square (90°): ${pair.label}`, weight: 1.5 });
         }
+        
         // Trine & Sextile: only major financial pairs (reduces noise drastically)
         if (isMajorPair) {
-          if (isCross(prevTri1, tri1) || isCross(prevTri2, tri2)) {
-            events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
+          const cTri1 = checkCross(prevTri1, tri1);
+          const cTri2 = checkCross(prevTri2, tri2);
+          if (cTri1 !== null || cTri2 !== null) {
+            const shift = cTri1 !== null ? cTri1 : cTri2;
+            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Trine (120°): ${pair.label}`, weight: 0.3 });
           }
-          if (isCross(prevSex1, sex1) || isCross(prevSex2, sex2)) {
-            events.push({ date: new Date(minAnchorMs + d * DAY_MS), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
+          
+          const cSex1 = checkCross(prevSex1, sex1);
+          const cSex2 = checkCross(prevSex2, sex2);
+          if (cSex1 !== null || cSex2 !== null) {
+            const shift = cSex1 !== null ? cSex1 : cSex2;
+            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Sextile (60°): ${pair.label}`, weight: 0.1 });
           }
         }
       }
@@ -561,23 +607,40 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         const sex2 = norm180(tLong - nLong + 60);
         
         if (d > 0) {
-          const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
-          const date = new Date(minAnchorMs + d * DAY_MS);
+          const checkCross = (p, c) => {
+            if (p !== null && c !== null && p * c <= 0 && Math.abs(p - c) < 180) {
+              return Math.abs(p) < Math.abs(c) ? -1 : 0;
+            }
+            return null;
+          };
+          
           const labelPrefix = `Tr. ${tPlanet} ➔ Nat. ${nPlanet}`;
-          if (isCross(prevConj, conj)) {
-            events.push({ date, label: `Natal: Konjungsi (0°) ${labelPrefix}`, weight: 3.5 });
+          
+          const cConj = checkCross(prevConj, conj);
+          if (cConj !== null) events.push({ date: new Date(minAnchorMs + (d + cConj) * DAY_MS), label: `Natal: Konjungsi (0°) ${labelPrefix}`, weight: 3.5 });
+          
+          const cOpp = checkCross(prevOpp, opp);
+          if (cOpp !== null) events.push({ date: new Date(minAnchorMs + (d + cOpp) * DAY_MS), label: `Natal: Oposisi (180°) ${labelPrefix}`, weight: 3.0 });
+          
+          const cSq1 = checkCross(prevSq1, sq1);
+          const cSq2 = checkCross(prevSq2, sq2);
+          if (cSq1 !== null || cSq2 !== null) {
+            const shift = cSq1 !== null ? cSq1 : cSq2;
+            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Square (90°) ${labelPrefix}`, weight: 2.0 });
           }
-          if (isCross(prevOpp, opp)) {
-            events.push({ date, label: `Natal: Oposisi (180°) ${labelPrefix}`, weight: 3.0 });
+          
+          const cTri1 = checkCross(prevTri1, tri1);
+          const cTri2 = checkCross(prevTri2, tri2);
+          if (cTri1 !== null || cTri2 !== null) {
+            const shift = cTri1 !== null ? cTri1 : cTri2;
+            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Trine (120°) ${labelPrefix}`, weight: 1.2 });
           }
-          if (isCross(prevSq1, sq1) || isCross(prevSq2, sq2)) {
-            events.push({ date, label: `Natal: Square (90°) ${labelPrefix}`, weight: 2.0 });
-          }
-          if (isCross(prevTri1, tri1) || isCross(prevTri2, tri2)) {
-            events.push({ date, label: `Natal: Trine (120°) ${labelPrefix}`, weight: 1.2 });
-          }
-          if (isCross(prevSex1, sex1) || isCross(prevSex2, sex2)) {
-            events.push({ date, label: `Natal: Sextile (60°) ${labelPrefix}`, weight: 0.5 });
+          
+          const cSex1 = checkCross(prevSex1, sex1);
+          const cSex2 = checkCross(prevSex2, sex2);
+          if (cSex1 !== null || cSex2 !== null) {
+            const shift = cSex1 !== null ? cSex1 : cSex2;
+            events.push({ date: new Date(minAnchorMs + (d + shift) * DAY_MS), label: `Natal: Sextile (60°) ${labelPrefix}`, weight: 0.5 });
           }
         }
         prevConj = conj; prevOpp = opp; prevSq1 = sq1; prevSq2 = sq2; prevTri1 = tri1; prevTri2 = tri2; prevSex1 = sex1; prevSex2 = sex2;
@@ -680,7 +743,8 @@ function rankClusters(clusters) {
     if (hasFibo && hasAstro) {
       rawScore *= 1.5; // High confidence synergy
     } else if (!hasFibo) {
-      rawScore *= 0.8; // Astro without Fibo is noisy, but don't penalize too much
+      // Jika klaster astrologi murni memiliki kekuatan sinyal tinggi (raw score >= 5.0), tidak dipenalti
+      if (rawScore < 5.0) rawScore *= 0.8; 
     } else if (!hasAstro) {
       rawScore *= 0.8; // Fibo without Astro is less reliable
     }
@@ -1091,7 +1155,7 @@ export default function App() {
     return Math.max(...parsedAnchors.map(a => a.ms + projectionDays * DAY_MS));
   }, [parsedAnchors, projectionDays]);
 
-  const fibZones = useMemo(() => computeFibZones(parsedAnchors, projectionDays, dayMode), [parsedAnchors, projectionDays, dayMode]);
+  const fibZones = useMemo(() => computeFibZones(parsedAnchors, projectionDays, dayMode, ticker), [parsedAnchors, projectionDays, dayMode, ticker]);
   const interFibZones = useMemo(() => computeInterAnchorFib(parsedAnchors, minAnchorMs, maxTargetMs), [parsedAnchors, minAnchorMs, maxTargetMs]);
   const moonEvents = useMemo(() => {
     const phases = computeMoonEvents(minAnchorMs, maxTargetMs);
@@ -1234,7 +1298,7 @@ export default function App() {
           const fibKey = `${params.projectionDays}|${params.dayMode}`;
           let testFibZones = fibCache.get(fibKey);
           if (!testFibZones) {
-            testFibZones = computeFibZones(parsedAnchors, params.projectionDays, params.dayMode);
+            testFibZones = computeFibZones(parsedAnchors, params.projectionDays, params.dayMode, ticker);
             fibCache.set(fibKey, testFibZones);
           }
 
@@ -1803,7 +1867,7 @@ export default function App() {
                 <>
                   <p className="text-sm text-slate-400 ml-11 mb-4 leading-relaxed">
                     Tanggal-tanggal berikut memiliki jumlah siklus (Fibonacci, bulan, planet) yang bertumpuk paling
-                    banyak — diurutkan dari yang terkuat.
+                    banyak
                   </p>
                   <div className="space-y-3">
                     {topPicks.map((c, i) => {
@@ -1842,6 +1906,7 @@ export default function App() {
                               {c.endMs !== c.ms ? ` – ${fmtDate(c.endDate)}` : ''}
                             </span>
                             <span className={`text-[11px] border px-2 py-0.5 rounded-full font-mono-custom font-medium ${has100PercentHitRate ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : hasFrequentProbHitRate ? 'bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-300' : hasHighProbHitRate ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-300' : 'bg-rose-500/10 border-rose-500/20 text-rose-300'}`}>Skor: {c.score ? c.score.toFixed(1) : 0}</span>
+                            <span className="text-[11px] bg-indigo-500/20 border border-indigo-500/40 px-2 py-0.5 rounded-full text-indigo-300 font-mono-custom font-bold">{c.events.length} Siklus</span>
                             {has100PercentHitRate && <span className="text-[10px] bg-emerald-500/20 border border-emerald-500/50 px-2 py-0.5 rounded-full text-emerald-200 font-mono-custom font-bold drop-shadow-md animate-pulse">💯 100% HIT RATE CYCLES</span>}
                             {hasFrequentProbHitRate && <span className="text-[10px] bg-fuchsia-500/20 border border-fuchsia-500/50 px-2 py-0.5 rounded-full text-fuchsia-200 font-mono-custom font-bold drop-shadow-md animate-pulse">⭐ PROVEN &gt;60% (20+ HITS)</span>}
                             {hasHighProbHitRate && <span className="text-[10px] bg-cyan-500/20 border border-cyan-500/50 px-2 py-0.5 rounded-full text-cyan-200 font-mono-custom font-bold drop-shadow-md animate-pulse">🔥 &gt;70% HIT RATE</span>}
@@ -2158,11 +2223,16 @@ export default function App() {
                         ? 'bg-cyan-950/20 border-cyan-500/50 hover:border-cyan-400 hover:shadow-lg hover:shadow-cyan-900/20'
                         : 'bg-midnight-800/40 border-rose-900/30 hover:border-rose-500/30'
                     }`} style={{ animationDelay: `${0.1 + i * 0.05}s` }}>
-                      <div className={`font-mono-custom text-sm mb-1.5 font-medium flex items-center gap-2 ${has100PercentHitRate ? 'text-emerald-300' : hasFrequentProbHitRate ? 'text-fuchsia-300' : hasHighProbHitRate ? 'text-cyan-300' : 'text-rose-300'}`}>
+                      <div className={`font-mono-custom text-sm mb-1.5 font-medium flex items-center flex-wrap gap-2 ${has100PercentHitRate ? 'text-emerald-300' : hasFrequentProbHitRate ? 'text-fuchsia-300' : hasHighProbHitRate ? 'text-cyan-300' : 'text-rose-300'}`}>
                         <span>
                           {fmtDate(c[0].date)}
                           {c[c.length - 1].ms !== c[0].ms ? ` – ${fmtDate(c[c.length - 1].date)}` : ''}
                         </span>
+                        {(() => {
+                          const rc = ranked.find(r => r.events === c);
+                          return rc ? <span className={`text-[10px] border px-1.5 py-0.5 rounded-full font-mono-custom font-medium ${has100PercentHitRate ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : hasFrequentProbHitRate ? 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-300' : hasHighProbHitRate ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' : 'bg-rose-500/10 border-rose-500/30 text-rose-300'}`}>Skor: {rc.score.toFixed(1)}</span> : null;
+                        })()}
+                        <span className="text-[10px] bg-indigo-500/20 border border-indigo-500/40 px-1.5 py-0.5 rounded-full text-indigo-300 font-mono-custom font-bold">{c.length} Siklus</span>
                         {has100PercentHitRate && <span className="text-[9px] bg-emerald-500/20 border border-emerald-500/50 px-1.5 py-0.5 rounded text-emerald-200 font-bold tracking-wider animate-pulse">💯 HIGH PROB</span>}
                         {hasFrequentProbHitRate && <span className="text-[9px] bg-fuchsia-500/20 border border-fuchsia-500/50 px-1.5 py-0.5 rounded text-fuchsia-200 font-bold tracking-wider animate-pulse">⭐ PROVEN &gt;60% (20+ HITS)</span>}
                         {hasHighProbHitRate && <span className="text-[9px] bg-cyan-500/20 border border-cyan-500/50 px-1.5 py-0.5 rounded text-cyan-200 font-bold tracking-wider animate-pulse">🔥 &gt;70% PROB</span>}
