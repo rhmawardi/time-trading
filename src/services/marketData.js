@@ -92,10 +92,11 @@ export function detectSwings(data, lookbackWindow = 14) {
     const highStrength = higherCount / totalBarsChecked;
     const lowStrength = lowerCount / totalBarsChecked;
     
-    // Require a minimum amount of right-side confirmation to avoid jumping the gun on the very last day
+    // Require a minimum amount of right-side confirmation to avoid premature signals
+    // Note: For production, we require confirmation even for the last bar to avoid false signals
     const minRightBarsRequired = Math.min(3, lookbackWindow);
-    if (rightWindow < minRightBarsRequired && i !== data.length - 1) {
-      continue; // Skip swings tanpa konfirmasi kanan yang cukup
+    if (rightWindow < minRightBarsRequired) {
+      continue; // Skip swings without sufficient right-side confirmation
     }
     
     // Significance filter: price range relative to local average

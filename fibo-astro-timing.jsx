@@ -16,15 +16,15 @@ const SYNODIC_MONTH = 29.530588853;
 
 // Mean orbital elements at epoch J2000 (good enough for cycle-timing purposes)
 const PLANETS = {
-  Mercury: { a: 0.387099, e: 0.205630, L0: 252.2509, peri: 77.4561, period: 87.9691 },
-  Venus: { a: 0.723332, e: 0.006772, L0: 181.9798, peri: 131.5637, period: 224.7008 },
-  Earth: { a: 1.0, e: 0.016709, L0: 100.4644, peri: 102.9373, period: 365.2564 },
-  Mars: { a: 1.523679, e: 0.0934, L0: 355.4533, peri: 336.0602, period: 686.9796 },
-  Jupiter: { a: 5.2026, e: 0.0489, L0: 34.3515, peri: 14.3312, period: 4332.59 },
-  Saturn: { a: 9.5549, e: 0.0557, L0: 49.9489, peri: 92.4318, period: 10759.22 },
-  Uranus: { a: 19.1913, e: 0.0472, L0: 312.56, peri: 170.96, period: 30685.4 },
-  Neptune: { a: 30.0689, e: 0.0086, L0: 304.88, peri: 44.97, period: 60189.0 },
-  Pluto: { a: 39.4820, e: 0.2488, L0: 238.92, peri: 224.07, period: 90560.0 },
+  Mercury: { a: 0.387099, e: 0.205630, i: 7.0049, node: 48.3316, L0: 252.2509, peri: 77.4561, period: 87.9691 },
+  Venus: { a: 0.723332, e: 0.006772, i: 3.3947, node: 76.6799, L0: 181.9798, peri: 131.5637, period: 224.7008 },
+  Earth: { a: 1.0, e: 0.016709, i: 0.0, node: 0.0, L0: 100.4644, peri: 102.9373, period: 365.2564 },
+  Mars: { a: 1.523679, e: 0.0934, i: 1.8497, node: 49.5574, L0: 355.4533, peri: 336.0602, period: 686.9796 },
+  Jupiter: { a: 5.2026, e: 0.0489, i: 1.3030, node: 100.4542, L0: 34.3515, peri: 14.3312, period: 4332.59 },
+  Saturn: { a: 9.5549, e: 0.0557, i: 2.4886, node: 113.6634, L0: 49.9489, peri: 92.4318, period: 10759.22 },
+  Uranus: { a: 19.1913, e: 0.0472, i: 0.7733, node: 74.0005, L0: 312.56, peri: 170.96, period: 30685.4 },
+  Neptune: { a: 30.0689, e: 0.0086, i: 1.7700, node: 131.7806, L0: 304.88, peri: 44.97, period: 60189.0 },
+  Pluto: { a: 39.4820, e: 0.2488, i: 17.1417, node: 110.3035, L0: 238.92, peri: 224.07, period: 90560.0 },
 };
 Object.values(PLANETS).forEach((p) => { p.n = 360 / p.period; });
 
@@ -79,21 +79,41 @@ function getPerturbation(body, days) {
   return 0;
 }
 
+function solveKepler(M, e) {
+  let E = M;
+  let F, dF;
+  for (let i = 0; i < 5; i++) {
+    F = E - e * Math.sin(E) - M;
+    dF = 1 - e * Math.cos(E);
+    E = E - F / dF;
+  }
+  return E;
+}
+
 function helio(p, days, dLon) {
   const L = ((p.L0 + p.n * days) % 360 + 360) % 360;
   const M = deg2rad((((L - p.peri) % 360) + 360) % 360);
   const e = p.e;
-  const e2 = e * e, e3 = e2 * e, e4 = e3 * e, e5 = e4 * e;
-  // 5th-order equation of center (upgraded from 3rd-order for Mercury precision)
-  const nu = M
-    + (2 * e - e3 / 4 + 5 * e5 / 96) * Math.sin(M)
-    + (5 * e2 / 4 - 11 * e4 / 24) * Math.sin(2 * M)
-    + (13 * e3 / 12 - 43 * e5 / 64) * Math.sin(3 * M)
-    + 103 * e4 / 96 * Math.sin(4 * M)
-    + 1097 * e5 / 960 * Math.sin(5 * M);
-  const trueLong = deg2rad(p.peri) + nu + deg2rad(dLon || 0);
-  const r = (p.a * (1 - e * e)) / (1 + e * Math.cos(nu));
-  return { x: r * Math.cos(trueLong), y: r * Math.sin(trueLong) };
+  
+  const E = solveKepler(M, e);
+  const v = 2 * Math.atan(Math.sqrt((1 + e) / (1 - e)) * Math.tan(E / 2));
+  const r = (p.a * (1 - e * e)) / (1 + e * Math.cos(v));
+  
+  const omega = deg2rad(p.peri - p.node);
+  const node = deg2rad(p.node);
+  const i = deg2rad(p.i);
+  const u = omega + v;
+  
+  const x = r * (Math.cos(node) * Math.cos(u) - Math.sin(node) * Math.sin(u) * Math.cos(i));
+  const y = r * (Math.sin(node) * Math.cos(u) + Math.cos(node) * Math.sin(u) * Math.cos(i));
+  const z = r * (Math.sin(u) * Math.sin(i));
+  
+  if (dLon !== 0) {
+    const lon = Math.atan2(y, x) + deg2rad(dLon);
+    const rxy = Math.sqrt(x*x + y*y);
+    return { x: rxy * Math.cos(lon), y: rxy * Math.sin(lon), z };
+  }
+  return { x, y, z };
 }
 function geoLong(key, days) {
   const dLon = getPerturbation(key, days);
@@ -204,7 +224,7 @@ const IPO_DATES = {
 const BEI_HOLIDAYS = [
   '2024-01-01', '2024-02-08', '2024-02-09', '2024-03-11', '2024-03-12', '2024-03-29', '2024-04-08', '2024-04-09', '2024-04-10', '2024-04-11', '2024-04-12', '2024-04-15', '2024-05-01', '2024-05-09', '2024-05-10', '2024-05-23', '2024-05-24', '2024-06-17', '2024-06-18', '2024-12-25', '2024-12-26',
   '2025-01-01', '2025-01-27', '2025-01-29', '2025-03-28', '2025-03-31', '2025-04-01', '2025-04-02', '2025-04-03', '2025-04-04', '2025-04-18', '2025-05-01', '2025-05-12', '2025-05-29', '2025-06-06', '2025-06-27', '2025-08-17', '2025-09-05', '2025-12-25', '2025-12-26',
-  '2026-01-01', '2026-02-17', '2026-03-19', '2026-03-20', '2026-04-03', '2026-05-01', '2026-05-14', '2026-06-01', '2026-08-17', '2026-12-25'
+  '2026-01-01', '2026-02-17', '2026-03-19', '2026-03-20', '2026-04-03', '2026-05-01', '2026-05-14', '2026-06-01', '2026-06-15', '2026-06-16', '2026-08-17', '2026-09-16', '2026-12-25', '2026-12-28'
 ];
 
 function addTradingDays(anchorMs, n) {
@@ -328,9 +348,11 @@ function computeMoonEvents(minAnchorMs, maxTargetMs) {
           const t = (ms - J2000) / DAY_MS;
           const T = t / 36525;
           const nodeLong = ((125.0445 - 1934.1363 * T) % 360 + 360) % 360;
-          const L0 = ((218.3165 + 481267.8813 * T) % 360 + 360) % 360;
-          const dist = Math.abs(norm180(L0 - nodeLong));
-          if (dist < 15 || Math.abs(dist - 180) < 15) isEclipse = true;
+          const sunLong = getLong('Sun', t);
+          const dist = Math.abs(norm180(sunLong - nodeLong));
+          // Eclipse limit: Solar ~15.5°, Lunar ~12.5° from node
+          const eclipseThreshold = (p.offset === 0) ? 15.5 : 12.5;
+          if (dist < eclipseThreshold || Math.abs(dist - 180) < eclipseThreshold) isEclipse = true;
         }
         events.push({ 
           date: new Date(ms), 
@@ -429,19 +451,31 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
   const anchorDaysJ2000 = (minAnchorMs - J2000) / DAY_MS;
   const maxDays = Math.ceil((maxTargetMs - minAnchorMs) / DAY_MS);
   const bodies = ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+  
+  // 1. Precalculate Ephemeris (O(N) Optimization)
+  const ephemeris = new Array(maxDays + 1);
+  for (let d = 0; d <= maxDays; d++) {
+    const days = anchorDaysJ2000 + d;
+    ephemeris[d] = {};
+    for (const b of bodies) {
+      ephemeris[d][b] = getLong(b, days);
+    }
+  }
+
   const PAIRS = [];
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       PAIRS.push({ a: bodies[i], b: bodies[j], label: `${bodies[i]}-${bodies[j]}` });
     }
   }
+  
   for (const pair of PAIRS) {
     const isMajorPair = MAJOR_FINANCIAL_PAIRS.has(pair.label);
     let prevConj = null, prevOpp = null, prevSq1 = null, prevSq2 = null, prevTri1 = null, prevTri2 = null, prevSex1 = null, prevSex2 = null;
+    
     for (let d = 0; d <= maxDays; d++) {
-      const days = anchorDaysJ2000 + d;
-      const la = getLong(pair.a, days);
-      const lb = getLong(pair.b, days);
+      const la = ephemeris[d][pair.a];
+      const lb = ephemeris[d][pair.b];
       const conj = norm180(la - lb), opp = norm180(la - lb - 180), sq1 = norm180(la - lb - 90), sq2 = norm180(la - lb + 90), tri1 = norm180(la - lb - 120), tri2 = norm180(la - lb + 120), sex1 = norm180(la - lb - 60), sex2 = norm180(la - lb + 60);
       
       if (d > 0) {
@@ -498,6 +532,15 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
   const maxDays = Math.ceil((maxTargetMs - minAnchorMs) / DAY_MS);
   const transitPlanets = ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
   
+  const ephemeris = new Array(maxDays + 1);
+  for (let d = 0; d <= maxDays; d++) {
+    const days = anchorDaysJ2000 + d;
+    ephemeris[d] = {};
+    for (const b of transitPlanets) {
+      ephemeris[d][b] = getLong(b, days);
+    }
+  }
+  
   for (const tPlanet of transitPlanets) {
     for (const nPlanet of Object.keys(natalPos)) {
       // Skip fast-fast combos that happen too often, focus on slow planets or same planet return
@@ -505,8 +548,7 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
       
       let prevConj = null, prevOpp = null, prevSq1 = null, prevSq2 = null, prevTri1 = null, prevTri2 = null, prevSex1 = null, prevSex2 = null;
       for (let d = 0; d <= maxDays; d++) {
-        const days = anchorDaysJ2000 + d;
-        const tLong = getLong(tPlanet, days);
+        const tLong = ephemeris[d][tPlanet];
         const nLong = natalPos[nPlanet];
         
         const conj = norm180(tLong - nLong);

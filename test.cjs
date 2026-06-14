@@ -4,15 +4,15 @@ const DAY_MS = 86400000;
 const J2000 = Date.UTC(2000, 0, 1, 12, 0, 0);
 
 const PLANETS = {
-  Mercury: { a: 0.387099, e: 0.205630, L0: 252.2509, peri: 77.4561, period: 87.9691 },
-  Venus: { a: 0.723332, e: 0.006772, L0: 181.9798, peri: 131.5637, period: 224.7008 },
-  Earth: { a: 1.0, e: 0.016709, L0: 100.4644, peri: 102.9373, period: 365.2564 },
-  Mars: { a: 1.523679, e: 0.0934, L0: 355.4533, peri: 336.0602, period: 686.9796 },
-  Jupiter: { a: 5.2026, e: 0.0489, L0: 34.3515, peri: 14.3312, period: 4332.59 },
-  Saturn: { a: 9.5549, e: 0.0557, L0: 49.9489, peri: 92.4318, period: 10759.22 },
-  Uranus: { a: 19.1913, e: 0.0472, L0: 312.56, peri: 170.96, period: 30685.4 },
-  Neptune: { a: 30.0689, e: 0.0086, L0: 304.88, peri: 44.97, period: 60189.0 },
-  Pluto: { a: 39.4820, e: 0.2488, L0: 238.92, peri: 224.07, period: 90560.0 },
+  Mercury: { a: 0.387099, e: 0.205630, i: 7.0049, node: 48.3316, L0: 252.2509, peri: 77.4561, period: 87.9691 },
+  Venus: { a: 0.723332, e: 0.006772, i: 3.3947, node: 76.6799, L0: 181.9798, peri: 131.5637, period: 224.7008 },
+  Earth: { a: 1.0, e: 0.016709, i: 0.0, node: 0.0, L0: 100.4644, peri: 102.9373, period: 365.2564 },
+  Mars: { a: 1.523679, e: 0.0934, i: 1.8497, node: 49.5574, L0: 355.4533, peri: 336.0602, period: 686.9796 },
+  Jupiter: { a: 5.2026, e: 0.0489, i: 1.3030, node: 100.4542, L0: 34.3515, peri: 14.3312, period: 4332.59 },
+  Saturn: { a: 9.5549, e: 0.0557, i: 2.4886, node: 113.6634, L0: 49.9489, peri: 92.4318, period: 10759.22 },
+  Uranus: { a: 19.1913, e: 0.0472, i: 0.7733, node: 74.0005, L0: 312.56, peri: 170.96, period: 30685.4 },
+  Neptune: { a: 30.0689, e: 0.0086, i: 1.7700, node: 131.7806, L0: 304.88, peri: 44.97, period: 60189.0 },
+  Pluto: { a: 39.4820, e: 0.2488, i: 17.1417, node: 110.3035, L0: 238.92, peri: 224.07, period: 90560.0 },
 };
 Object.values(PLANETS).forEach((p) => { p.n = 360 / p.period; });
 
@@ -64,20 +64,41 @@ function getPerturbation(body, days) {
   return 0;
 }
 
+function solveKepler(M, e) {
+  let E = M;
+  let F, dF;
+  for (let i = 0; i < 5; i++) {
+    F = E - e * Math.sin(E) - M;
+    dF = 1 - e * Math.cos(E);
+    E = E - F / dF;
+  }
+  return E;
+}
+
 function helio(p, days, dLon) {
   const L = ((p.L0 + p.n * days) % 360 + 360) % 360;
   const M = deg2rad((((L - p.peri) % 360) + 360) % 360);
   const e = p.e;
-  const e2 = e * e, e3 = e2 * e, e4 = e3 * e, e5 = e4 * e;
-  const nu = M
-    + (2 * e - e3 / 4 + 5 * e5 / 96) * Math.sin(M)
-    + (5 * e2 / 4 - 11 * e4 / 24) * Math.sin(2 * M)
-    + (13 * e3 / 12 - 43 * e5 / 64) * Math.sin(3 * M)
-    + 103 * e4 / 96 * Math.sin(4 * M)
-    + 1097 * e5 / 960 * Math.sin(5 * M);
-  const trueLong = deg2rad(p.peri) + nu + deg2rad(dLon || 0);
-  const r = (p.a * (1 - e * e)) / (1 + e * Math.cos(nu));
-  return { x: r * Math.cos(trueLong), y: r * Math.sin(trueLong) };
+  
+  const E = solveKepler(M, e);
+  const v = 2 * Math.atan(Math.sqrt((1 + e) / (1 - e)) * Math.tan(E / 2));
+  const r = (p.a * (1 - e * e)) / (1 + e * Math.cos(v));
+  
+  const omega = deg2rad(p.peri - p.node);
+  const node = deg2rad(p.node);
+  const i = deg2rad(p.i);
+  const u = omega + v;
+  
+  const x = r * (Math.cos(node) * Math.cos(u) - Math.sin(node) * Math.sin(u) * Math.cos(i));
+  const y = r * (Math.sin(node) * Math.cos(u) + Math.cos(node) * Math.sin(u) * Math.cos(i));
+  const z = r * (Math.sin(u) * Math.sin(i));
+  
+  if (dLon !== 0) {
+    const lon = Math.atan2(y, x) + deg2rad(dLon);
+    const rxy = Math.sqrt(x*x + y*y);
+    return { x: rxy * Math.cos(lon), y: rxy * Math.sin(lon), z };
+  }
+  return { x, y, z };
 }
 
 function geoLong(key, days) {
@@ -186,7 +207,16 @@ function computeMoonEvents(minAnchorMs, maxTargetMs) {
     for (const p of phases) {
       const ms = meeusPhaseMs(ki + p.offset);
       if (ms >= minAnchorMs && ms <= maxTargetMs) {
-        events.push({ date: new Date(ms), label: p.label });
+        let isEclipse = false;
+        if (p.offset === 0 || p.offset === 0.5) {
+          const t = (ms - J2000) / DAY_MS;
+          const T = t / 36525;
+          const nodeLong = ((125.0445 - 1934.1363 * T) % 360 + 360) % 360;
+          const sunLong = getLong('Sun', t);
+          const dist = Math.abs(norm180(sunLong - nodeLong));
+          if (dist < 18 || Math.abs(dist - 180) < 18) isEclipse = true;
+        }
+        events.push({ date: new Date(ms), label: isEclipse ? `Gerhana / Eclipse (${p.label})` : p.label });
       }
     }
   }
