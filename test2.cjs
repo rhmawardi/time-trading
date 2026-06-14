@@ -51,7 +51,7 @@ function getPerturbation(body, days) {
 }
 
 function helio(p, days, dLon) {
-  const L = (p.L0 + p.n * days) % 360;
+  const L = ((p.L0 + p.n * days) % 360 + 360) % 360;
   const M = deg2rad((((L - p.peri) % 360) + 360) % 360);
   const e = p.e;
   const e2 = e * e, e3 = e2 * e, e4 = e3 * e, e5 = e4 * e;

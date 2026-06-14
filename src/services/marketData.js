@@ -95,8 +95,7 @@ export function detectSwings(data, lookbackWindow = 14) {
     // Require a minimum amount of right-side confirmation to avoid jumping the gun on the very last day
     const minRightBarsRequired = Math.min(3, lookbackWindow);
     if (rightWindow < minRightBarsRequired && i !== data.length - 1) {
-       // If we don't have enough right bars to confirm, and it's not literally the last day, be more strict
-       // We'll skip for now unless it's an extreme spike (handled below implicitly by strength)
+      continue; // Skip swings tanpa konfirmasi kanan yang cukup
     }
     
     // Significance filter: price range relative to local average

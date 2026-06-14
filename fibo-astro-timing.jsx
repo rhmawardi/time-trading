@@ -80,7 +80,7 @@ function getPerturbation(body, days) {
 }
 
 function helio(p, days, dLon) {
-  const L = (p.L0 + p.n * days) % 360;
+  const L = ((p.L0 + p.n * days) % 360 + 360) % 360;
   const M = deg2rad((((L - p.peri) % 360) + 360) % 360);
   const e = p.e;
   const e2 = e * e, e3 = e2 * e, e4 = e3 * e, e5 = e4 * e;
@@ -160,8 +160,8 @@ function computeIngressEvents(minMs, maxMs) {
     ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].forEach(planet => {
       const lPrev = getLong(planet, tPrev);
       const lCurr = getLong(planet, tCurr);
-      const sPrev = Math.floor(lPrev / 30);
-      const sCurr = Math.floor(lCurr / 30);
+      const sPrev = Math.floor(((lPrev % 360) + 360) % 360 / 30) % 12;
+      const sCurr = Math.floor(((lCurr % 360) + 360) % 360 / 30) % 12;
       
       if (sPrev !== sCurr) {
         const signName = SIGNS[sCurr];
@@ -208,6 +208,7 @@ const BEI_HOLIDAYS = [
 ];
 
 function addTradingDays(anchorMs, n) {
+  if (n <= 0) return new Date(anchorMs);
   let ms = anchorMs;
   let added = 0;
   while (added < n) {
@@ -444,7 +445,7 @@ function computePlanetEvents(minAnchorMs, maxTargetMs) {
       const conj = norm180(la - lb), opp = norm180(la - lb - 180), sq1 = norm180(la - lb - 90), sq2 = norm180(la - lb + 90), tri1 = norm180(la - lb - 120), tri2 = norm180(la - lb + 120), sex1 = norm180(la - lb - 60), sex2 = norm180(la - lb + 60);
       
       if (d > 0) {
-        const isCross = (p, c) => p !== null && c !== null && (p >= 0 ? 1 : -1) !== (c >= 0 ? 1 : -1) && Math.abs(p - c) < 180;
+        const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
         
         // Conjunction & Opposition: all pairs (high significance)
         if (isCross(prevConj, conj)) {
@@ -518,7 +519,7 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         const sex2 = norm180(tLong - nLong + 60);
         
         if (d > 0) {
-          const isCross = (p, c) => p !== null && c !== null && (p >= 0 ? 1 : -1) !== (c >= 0 ? 1 : -1) && Math.abs(p - c) < 180;
+          const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
           const date = new Date(minAnchorMs + d * DAY_MS);
           const labelPrefix = `Tr. ${tPlanet} ➔ Nat. ${nPlanet}`;
           if (isCross(prevConj, conj)) {
@@ -841,6 +842,7 @@ function attachProjections(dailyData, topPicks) {
   if (finalSteps > 0) {
     const finalTargetPrice = isGoingDown ? currentStartPrice * (1 - amplitudePct) : currentStartPrice * (1 + amplitudePct);
     for (let j = 1; j <= finalSteps; j++) {
+      // Sengaja menggunakan finalSteps * 2 agar proyeksi melemah (50% amplitude) setelah konfluensi terakhir
       enriched[currentStartIdx + j].projectedPrice = currentStartPrice + (finalTargetPrice - currentStartPrice) * (j / (finalSteps * 2));
     }
   }
@@ -1094,7 +1096,7 @@ export default function App() {
     });
     
     const statsArr = Array.from(statsMap.values())
-      .filter(s => s.total >= 2)
+      .filter(s => s.total >= 3)
       .map(s => ({
         ...s,
         hitRate: s.total > 0 ? (s.hits / s.total) * 100 : 0
@@ -1134,7 +1136,15 @@ export default function App() {
   const weekly = useMemo(() => attachProjectionsWeekly(weeklyBase, daily), [weeklyBase, daily]);
 
   const backtestResult = useMemo(
-    () => computeBacktest(ranked.filter(c => c.score >= minSignalScore).map(c => c.events), actualReversals, confluenceTolerance),
+    () => {
+      const revMs = actualReversals.map(d => Date.parse(`${d.date}T00:00:00Z`)).filter(ms => !Number.isNaN(ms));
+      if (revMs.length === 0) return computeBacktest([], actualReversals, confluenceTolerance);
+      const maxRevMs = Math.max(...revMs);
+      const pastClusters = ranked
+        .filter(c => c.score >= minSignalScore && c.ms <= maxRevMs + confluenceTolerance * DAY_MS)
+        .map(c => c.events);
+      return computeBacktest(pastClusters, actualReversals, confluenceTolerance);
+    },
     [ranked, actualReversals, confluenceTolerance, minSignalScore]
   );
 

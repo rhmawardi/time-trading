@@ -51,7 +51,7 @@ function getPerturbation(body, days) {
 }
 
 function helio(p, days, dLon) {
-  const L = (p.L0 + p.n * days) % 360;
+  const L = ((p.L0 + p.n * days) % 360 + 360) % 360;
   const M = deg2rad((((L - p.peri) % 360) + 360) % 360);
   const e = p.e;
   const e2 = e * e, e3 = e2 * e, e4 = e3 * e, e5 = e4 * e;
@@ -127,22 +127,20 @@ function computeNatalEvents(ticker, minAnchorMs, maxTargetMs) {
         if (d > 0) {
           const date = new Date(minAnchorMs + d * DAY_MS);
           const labelPrefix = `Tr. ${tPlanet} ➔ Nat. ${nPlanet}`;
-          if (Math.sign(prevConj) !== Math.sign(conj) && Math.abs(prevConj - conj) < 180) {
+          const isCross = (p, c) => p !== null && c !== null && p * c < 0 && Math.abs(p - c) < 180;
+          if (isCross(prevConj, conj)) {
             events.push({ date, label: `Natal: Konjungsi (0°) ${labelPrefix}` });
           }
-          if (Math.sign(prevOpp) !== Math.sign(opp) && Math.abs(prevOpp - opp) < 180) {
+          if (isCross(prevOpp, opp)) {
             events.push({ date, label: `Natal: Oposisi (180°) ${labelPrefix}` });
           }
-          if ((Math.sign(prevSq1) !== Math.sign(sq1) && Math.abs(prevSq1 - sq1) < 180) || 
-              (Math.sign(prevSq2) !== Math.sign(sq2) && Math.abs(prevSq2 - sq2) < 180)) {
+          if (isCross(prevSq1, sq1) || isCross(prevSq2, sq2)) {
             events.push({ date, label: `Natal: Square (90°) ${labelPrefix}` });
           }
-          if ((Math.sign(prevTri1) !== Math.sign(tri1) && Math.abs(prevTri1 - tri1) < 180) || 
-              (Math.sign(prevTri2) !== Math.sign(tri2) && Math.abs(prevTri2 - tri2) < 180)) {
+          if (isCross(prevTri1, tri1) || isCross(prevTri2, tri2)) {
             events.push({ date, label: `Natal: Trine (120°) ${labelPrefix}` });
           }
-          if ((Math.sign(prevSex1) !== Math.sign(sex1) && Math.abs(prevSex1 - sex1) < 180) || 
-              (Math.sign(prevSex2) !== Math.sign(sex2) && Math.abs(prevSex2 - sex2) < 180)) {
+          if (isCross(prevSex1, sex1) || isCross(prevSex2, sex2)) {
             events.push({ date, label: `Natal: Sextile (60°) ${labelPrefix}` });
           }
         }

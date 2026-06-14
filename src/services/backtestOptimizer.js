@@ -31,7 +31,7 @@ export async function runGridSearchOptimizer(runTestCallback, onProgress = () =>
 
   // ---- Phase 1: Coarse Search ----
   const coarseTolerances = [0, 0.5, 1.0, 1.5, 2.0];
-  const coarseSwings = [7, 14, 21];
+  const coarseSwings = [14]; // swingLookback doesn't affect backtest calculation, hanya untuk Auto-Detect
   const coarseMinScores = [2.0, 5.0, 8.0, 12.0];
   const coarseProjections = [90, 180, 365];
   const dayModes = ['trading', 'calendar'];
