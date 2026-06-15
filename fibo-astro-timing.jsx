@@ -1321,6 +1321,9 @@ export default function App() {
   const [gridSearchResult, setGridSearchResult] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizerProgress, setOptimizerProgress] = useState({ phase: 0, percent: 0, bestSoFar: null });
+  const [isDeepOptimizing, setIsDeepOptimizing] = useState(false);
+  const [deepOptimizeTarget, setDeepOptimizeTarget] = useState(null);
+  const [deepOptimizeProgress, setDeepOptimizeProgress] = useState(null);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstallable, setIsInstallable] = useState(false);
 
@@ -1440,27 +1443,12 @@ export default function App() {
 
   const topPicks = useMemo(() => {
     const todayMs = new Date().setHours(0, 0, 0, 0);
-    const futureClusters = ranked.filter(c => c.ms > todayMs);
+    // Menggunakan kriteria yang persis sama dengan Laporan Backtesting (berdasarkan minSignalScore)
+    // namun hanya untuk tanggal masa depan ( > todayMs )
+    const futureClusters = ranked.filter(c => c.score >= minSignalScore && c.ms > todayMs);
     
-    const strongest10 = futureClusters.slice(0, 10);
-    
-    // Cari semua cluster masa depan yang memiliki siklus dengan 100% Hit Rate ATAU Proven (>60% & >20 hits)
-    const guaranteedPicks = futureClusters.filter(c => {
-      return c.events.some(e => {
-        const stat = astroCycleStats.find(s => s.label === e.label);
-        if (!stat) return false;
-        return stat.hitRate >= 99.9 || (stat.hitRate > 60 && stat.total > 20);
-      });
-    });
-    
-    // Gabungkan (agar tidak ada duplikat jika siklus sakti tersebut sudah ada di top 10)
-    const combined = [...strongest10, ...guaranteedPicks];
-    const uniqueMap = new Map();
-    combined.forEach(c => uniqueMap.set(c.ms, c));
-    
-    const finalPicks = Array.from(uniqueMap.values());
-    return finalPicks.sort((a, b) => a.ms - b.ms);
-  }, [ranked, astroCycleStats]);
+    return futureClusters.sort((a, b) => a.ms - b.ms);
+  }, [ranked, minSignalScore]);
 
   const weeklyBase = useMemo(() => buildWeekly(all, minAnchorMs, maxTargetMs, actualReversals, marketData), [all, minAnchorMs, maxTargetMs, actualReversals, marketData]);
   const dailyBase = useMemo(() => buildDaily(all, minAnchorMs, maxTargetMs, actualReversals, marketData), [all, minAnchorMs, maxTargetMs, actualReversals, marketData]);
@@ -1848,6 +1836,238 @@ export default function App() {
     }
   };
 
+  const handleDeepOptimize = async (targetMetric = 'precision') => {
+    if (!ticker.trim()) return alert('Silakan masukkan kode aset (ticker) terlebih dahulu!');
+    setIsDeepOptimizing(true);
+    setDeepOptimizeTarget(targetMetric);
+    setDeepOptimizeProgress({ percent: 0, text: 'Memuat data market...' });
+    
+    try {
+      const data = await fetchMarketData(ticker.trim().toUpperCase());
+      setMarketData(data);
+      const swings = detectSwings(data, swingLookback);
+      
+      const revList = swings.map((s, i) => ({ id: Date.now() + i, date: s.date }));
+      setActualReversals(revList);
+      
+      if (swings.length < 3) {
+        alert("Swing tidak cukup untuk dioptimasi.");
+        setIsDeepOptimizing(false);
+        return;
+      }
+
+      const candidateSwingsMap = new Map();
+      if (swings.length > 0) {
+        let absHigh = swings[0], absLow = swings[0];
+        swings.forEach(s => {
+          if (s.type === 'high' && s.value > absHigh.value) absHigh = s;
+          if (s.type === 'low' && s.value < absLow.value) absLow = s;
+        });
+        candidateSwingsMap.set(absHigh.date, absHigh);
+        candidateSwingsMap.set(absLow.date, absLow);
+      }
+      const recentSwings = swings.slice(-25);
+      recentSwings.forEach(s => candidateSwingsMap.set(s.date, s));
+      const finalCandidateSwings = Array.from(candidateSwingsMap.values()).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      const combinations = [];
+      const n = finalCandidateSwings.length;
+      for (let i = 0; i < n; i++) combinations.push([finalCandidateSwings[i]]);
+      for (let i = 0; i < n - 1; i++) {
+        for (let j = i + 1; j < n; j++) combinations.push([finalCandidateSwings[i], finalCandidateSwings[j]]);
+      }
+      for (let i = 0; i < n - 2; i++) {
+        for (let j = i + 1; j < n - 1; j++) {
+          for (let k = j + 1; k < n; k++) {
+            const s1 = finalCandidateSwings[i], s2 = finalCandidateSwings[j], s3 = finalCandidateSwings[k];
+            if (s1.type !== s2.type && s2.type !== s3.type) combinations.push([s1, s2, s3]);
+          }
+        }
+      }
+
+      combinations.sort((a, b) => {
+        const maxA = Math.max(...a.map(s => new Date(s.date).getTime()));
+        const maxB = Math.max(...b.map(s => new Date(s.date).getTime()));
+        return maxB - maxA; 
+      });
+
+      const yieldToUI = () => new Promise(r => setTimeout(r, 0));
+
+      const gridProjections = [90, 180, 365];
+      const gridDayModes = ['trading', 'calendar'];
+      const gridTolerances = [0, 0.5, 1.0, 1.5, 2.0];
+      const gridMinScores = [2.0, 4.0, 6.0, 8.0, 10.0, 12.0];
+      
+      const astroCombos = [
+        { n: false, r: false, i: false, l: false, s: false },
+        { n: true, r: false, i: false, l: false, s: false },
+        { n: false, r: true, i: false, l: false, s: false },
+        { n: false, r: false, i: true, l: false, s: false },
+        { n: true, r: true, i: false, l: false, s: false },
+        { n: true, r: false, i: true, l: false, s: false },
+        { n: false, r: true, i: true, l: false, s: false },
+        { n: true, r: true, i: true, l: false, s: false },
+        { n: true, r: true, i: true, l: true, s: false },
+        { n: true, r: true, i: true, l: false, s: true },
+        { n: true, r: true, i: true, l: true, s: true },
+        { n: false, r: false, i: false, l: false, s: true }
+      ];
+
+      const minAnchorMs = new Date(finalCandidateSwings[0].date).getTime();
+      const lastRevMs = Math.max(...revList.map(r => Date.parse(`${r.date}T00:00:00Z`)));
+      const ancOptRevMs = revList.map(d => Date.parse(`${d.date}T00:00:00Z`)).filter(ms => !Number.isNaN(ms));
+      const gsMaxRevMs = ancOptRevMs.length > 0 ? Math.max(...ancOptRevMs) : 0;
+
+      setDeepOptimizeProgress({ percent: 2, text: 'Pre-computing pergerakan Astro (Cache)...' });
+      await yieldToUI();
+      
+      const astroCache = new Map();
+      for (const projDays of gridProjections) {
+        const globalMaxAnchorMs = new Date(finalCandidateSwings[finalCandidateSwings.length - 1].date).getTime();
+        const maxTargetMs = Math.max(globalMaxAnchorMs + projDays * DAY_MS, lastRevMs + 2.0 * DAY_MS); 
+        
+        astroCache.set(projDays, {
+          moon: [...computeMoonEvents(minAnchorMs, maxTargetMs), ...computeMoonDeclinationEvents(minAnchorMs, maxTargetMs)].sort((a, b) => a.date.getTime() - b.date.getTime()),
+          planet: computePlanetEvents(minAnchorMs, maxTargetMs),
+          natal: computeNatalEvents(ticker, minAnchorMs, maxTargetMs),
+          retro: computeRetrogradeEvents(minAnchorMs, maxTargetMs),
+          ingress: computeIngressEvents(minAnchorMs, maxTargetMs),
+          lunarNode: computeLunarNodeEvents(minAnchorMs, maxTargetMs),
+          speed: computeSpeedExtremeEvents(minAnchorMs, maxTargetMs)
+        });
+        await yieldToUI();
+      }
+
+      let globalBest = null;
+      let totalTests = combinations.length * gridProjections.length * gridDayModes.length * gridTolerances.length * gridMinScores.length * astroCombos.length;
+      let testCount = 0;
+
+      setDeepOptimizeProgress({ percent: 5, text: `Mulai exhaustive search...` });
+      
+      const precomputedStats = astroCycleStats;
+
+      for (let i = 0; i < combinations.length; i++) {
+        const combo = combinations[i];
+        const testAnchors = combo.map((s, idx) => ({ id: `opt-${idx}`, date: s.date, high: s.type === 'high' ? String(s.value.toFixed(2)) : '', low: s.type === 'low' ? String(s.value.toFixed(2)) : '', ms: new Date(s.date).getTime() }));
+
+        const testMinAnchorMs = Math.min(...testAnchors.map(a => a.ms));
+        
+        for (const projDays of gridProjections) {
+          const testMaxTargetMs = Math.max(...testAnchors.map(a => a.ms + projDays * DAY_MS));
+          const cachedAstro = astroCache.get(projDays);
+          const interFibZones = computeInterAnchorFib(testAnchors, testMinAnchorMs, testMaxTargetMs);
+
+          for (const dMode of gridDayModes) {
+            const fibZones = computeFibZones(testAnchors, projDays, dMode, ticker);
+
+            for (const tol of gridTolerances) {
+              for (const aCombo of astroCombos) {
+                const { clusters } = buildConfluence(
+                  fibZones, interFibZones, cachedAstro.moon, cachedAstro.planet,
+                  aCombo.n ? cachedAstro.natal : [], aCombo.r ? cachedAstro.retro : [],
+                  aCombo.i ? cachedAstro.ingress : [], aCombo.l ? cachedAstro.lunarNode : [],
+                  aCombo.s ? cachedAstro.speed : [], tol
+                );
+                
+                const rankedClusters = rankClusters(clusters, precomputedStats);
+
+                for (const minScore of gridMinScores) {
+                  testCount++;
+                  const filteredClusters = rankedClusters.filter(c => c.score >= minScore && c.ms <= gsMaxRevMs + tol * DAY_MS).map(c => c.events);
+                  const result = computeBacktest(filteredClusters, revList, tol);
+
+                  let isBetter = false;
+                  // Untuk Precision: harus > 60%, prioritas utama adalah kejadian terbanyak
+                  const isValidCandidate = targetMetric === 'precision' ? result.precision >= 60.0 : true;
+
+                  if (isValidCandidate) {
+                    if (!globalBest) {
+                      isBetter = true;
+                    } else if (targetMetric === 'precision') {
+                      isBetter = result.totalClusters > globalBest.result.totalClusters || 
+                                 (result.totalClusters === globalBest.result.totalClusters && result.precision > globalBest.result.precision);
+                    } else {
+                      isBetter = result.f1 > globalBest.result.f1 || (result.f1 === globalBest.result.f1 && result.precision > globalBest.result.precision);
+                    }
+                  }
+
+                  if (isBetter) {
+                    globalBest = { 
+                      anchorCombo: combo, 
+                      result, 
+                      params: {
+                        confluenceTolerance: tol,
+                        minSignalScore: minScore,
+                        projectionDays: projDays,
+                        dayMode: dMode,
+                        useNatal: aCombo.n,
+                        useRetrograde: aCombo.r,
+                        useIngress: aCombo.i,
+                        useLunarNode: aCombo.l,
+                        useSpeedExtremes: aCombo.s,
+                        swingLookback 
+                      } 
+                    };
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        if (i % 5 === 0 || i === combinations.length - 1) {
+          const perc = Math.max(5, Math.round((testCount / totalTests) * 100));
+          const bestScoreText = targetMetric === 'precision' 
+            ? `${globalBest?.result?.totalClusters || 0} Kejadian (Presisi ${globalBest?.result?.precision?.toFixed(1) || 0}%)`
+            : `F1 ${globalBest?.result?.f1?.toFixed(1) || 0}%`;
+          setDeepOptimizeProgress({ 
+            percent: perc, 
+            text: `Exhaustive Search ${perc}% (Terbaik: ${bestScoreText})`
+          });
+          await yieldToUI();
+        }
+      }
+
+      if (globalBest && globalBest.result) {
+        setAnchors(globalBest.anchorCombo.map((s, i) => ({
+          id: Date.now() + i,
+          date: s.date,
+          high: s.type === 'high' ? String(s.value.toFixed(2)) : '',
+          low: s.type === 'low' ? String(s.value.toFixed(2)) : '',
+        })));
+        const p = globalBest.params;
+        setConfluenceTolerance(p.confluenceTolerance);
+        setSwingLookback(p.swingLookback);
+        setMinSignalScore(p.minSignalScore);
+        setProjectionDays(p.projectionDays);
+        setDayMode(p.dayMode);
+        setUseNatal(p.useNatal);
+        setUseRetrograde(p.useRetrograde);
+        setUseIngress(p.useIngress);
+        setUseLunarNode(p.useLunarNode);
+        setUseSpeedExtremes(p.useSpeedExtremes);
+        
+        let alertMsg = `Deep Optimize Selesai! Menguji ${testCount.toLocaleString()} skenario.\n`;
+        if (targetMetric === 'precision') {
+          alertMsg += `Terbaik: ${globalBest.result.totalClusters} Kejadian dengan Presisi: ${globalBest.result.precision.toFixed(1)}% (F1: ${globalBest.result.f1.toFixed(1)}%).`;
+        } else {
+          alertMsg += `Terbaik: F1-Score: ${globalBest.result.f1.toFixed(1)}% (Presisi: ${globalBest.result.precision.toFixed(1)}%).`;
+        }
+        alert(alertMsg);
+      } else {
+        const errorDetail = targetMetric === 'precision' ? '(Minimal Presisi > 60%)' : '';
+        alert(`Deep Optimize Selesai! Menguji ${testCount.toLocaleString()} skenario.\nNamun tidak ditemukan setelan yang memenuhi syarat ${errorDetail}.`);
+      }
+
+    } catch (err) {
+      alert("Gagal melakukan Deep Optimize: " + err.message);
+    } finally {
+      setIsDeepOptimizing(false);
+      setDeepOptimizeProgress(null);
+      setIsLoadingData(false);
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-midnight-950 text-slate-100 p-4 sm:p-6 relative overflow-hidden">
@@ -1953,36 +2173,65 @@ export default function App() {
                   <option value="GC=F">Gold Futures (GC=F)</option>
                 </optgroup>
               </select>
-              <div className="flex gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
-                <button 
-                  onClick={() => handleAutoDetect('normal')} 
-                  disabled={isLoadingData || anchorOptimizeProgress}
-                  className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:from-indigo-800 disabled:to-indigo-800 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-indigo-600/20 hover:shadow-indigo-500/40 disabled:shadow-none"
-                >
-                  {isLoadingData && !anchorOptimizeProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  {isLoadingData && !anchorOptimizeProgress ? 'Menarik...' : 'Auto-Detect (15 Titik)'}
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 w-full">
                 <button 
                   onClick={() => handleAutoDetect('golden')} 
-                  disabled={isLoadingData || anchorOptimizeProgress}
-                  className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-amber-800 disabled:to-amber-800 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-amber-600/20 hover:shadow-amber-500/40 disabled:shadow-none"
+                  disabled={isLoadingData || anchorOptimizeProgress || isDeepOptimizing}
+                  className="w-full flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-amber-800 disabled:to-amber-800 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-amber-600/20 hover:shadow-amber-500/40 disabled:shadow-none"
                   title="Gunakan pengaturan terbaik (3-Anchor) untuk akurasi optimal"
                 >
-                  <Zap className="w-3.5 h-3.5" />
-                  Setelan Emas (3 Titik)
+                  {isLoadingData && !anchorOptimizeProgress && !isDeepOptimizing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                  {isLoadingData && !anchorOptimizeProgress && !isDeepOptimizing ? 'Menarik...' : 'Setelan Emas'}
                 </button>
                 <button 
                   onClick={() => handleOptimizeAnchors()} 
-                  disabled={isLoadingData || anchorOptimizeProgress}
-                  className="flex-1 sm:flex-none flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:from-purple-900 disabled:to-indigo-900 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-purple-600/20 hover:shadow-purple-500/40 disabled:shadow-none"
+                  disabled={isLoadingData || anchorOptimizeProgress || isDeepOptimizing}
+                  className="w-full flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:from-purple-900 disabled:to-indigo-900 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-purple-600/20 hover:shadow-purple-500/40 disabled:shadow-none"
                   title="Mencari kombinasi 2-3 anchor terbaik yang menghasilkan skor tertinggi secara otomatis"
                 >
                   {anchorOptimizeProgress ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                   {anchorOptimizeProgress ? anchorOptimizeProgress.text : 'Auto-Optimasi Titik'}
                 </button>
+                <button 
+                  onClick={() => handleDeepOptimize('precision')} 
+                  disabled={isLoadingData || anchorOptimizeProgress || isDeepOptimizing || isOptimizing}
+                  className="w-full flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 disabled:from-pink-900 disabled:to-rose-900 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-pink-600/20 hover:shadow-pink-500/40 disabled:shadow-none border border-pink-400/30"
+                  title="Mencari Anchor DAN Settingan Parameter terbaik sekaligus secara bersamaan (Memprioritaskan Presisi)"
+                >
+                  {isDeepOptimizing && deepOptimizeTarget === 'precision' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {isDeepOptimizing && deepOptimizeTarget === 'precision' ? 'Memproses...' : 'Optimize Precision'}
+                </button>
+                <button 
+                  onClick={() => handleDeepOptimize('f1')} 
+                  disabled={isLoadingData || anchorOptimizeProgress || isDeepOptimizing || isOptimizing}
+                  className="w-full flex items-center justify-center whitespace-nowrap gap-1.5 text-xs bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:from-emerald-900 disabled:to-teal-900 text-white px-3 py-2 rounded-lg font-medium transition-all duration-200 shadow-lg shadow-emerald-600/20 hover:shadow-emerald-500/40 disabled:shadow-none border border-emerald-400/30"
+                  title="Mencari Anchor DAN Settingan Parameter terbaik sekaligus secara bersamaan (Memprioritaskan F1-Score)"
+                >
+                  {isDeepOptimizing && deepOptimizeTarget === 'f1' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  {isDeepOptimizing && deepOptimizeTarget === 'f1' ? 'Memproses...' : 'Optimize F1-Score'}
+                </button>
               </div>
             </div>
           </div>
+
+          {isDeepOptimizing && deepOptimizeProgress && (
+            <div className="mb-4 animate-fade-in glass p-4 rounded-xl border border-pink-500/30 mt-4">
+              <div className="flex justify-between text-xs text-slate-300 mb-1.5 font-medium">
+                <span className="flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-pink-400" /> Deep Optimize berjalan...</span>
+                <span className="font-mono-custom text-pink-400">{deepOptimizeProgress.percent || 0}%</span>
+              </div>
+              <div className="w-full h-2 bg-midnight-800 rounded-full overflow-hidden border border-slate-700/30 mb-2">
+                <div
+                  className="h-full bg-gradient-to-r from-pink-500 via-rose-400 to-amber-400 rounded-full transition-all duration-500 ease-out relative"
+                  style={{ width: `${deepOptimizeProgress.percent || 0}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 animate-pulse" style={{ animationDuration: '1s' }} />
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 text-center">{deepOptimizeProgress.text}</p>
+            </div>
+          )}
+
           <div className="space-y-5 mt-5">
             {/* Baris 1: Slider Pengaturan Dasar */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
